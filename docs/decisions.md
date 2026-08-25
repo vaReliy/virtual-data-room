@@ -358,7 +358,8 @@ applied at the edge so name uniqueness and email matching behave predictably.
 
 ## 13. API shape: one call, bare object, opaque cursor
 
-**Status:** Accepted
+**Status:** Accepted. Response shape refined by #24 — read that one for what the endpoint
+actually returns.
 
 **Decision.** `GET /api/rooms/:roomId/nodes/:nodeId?cursor=` returns
 `{ node, breadcrumbs, children, nextCursor }`. Omitting `nodeId` means the room root.
@@ -418,7 +419,9 @@ stretch list.
 
 ## 16. Test scope: Vitest, two layers, written where the code is
 
-**Status:** Accepted
+**Status:** Accepted, with two amendments. Timing superseded by #26 — the integration
+tests ship with the code they exercise, not as an end-of-Phase-4 block. The
+"`USER`-token mode branch" named below does not exist; see #27.
 
 **Decision.** Vitest in both apps — one runner, one config idiom.
 
@@ -516,7 +519,8 @@ the race it was meant to fix.
 
 ## 21. Data Rooms: multi-room model, minimal UI
 
-**Status:** Accepted
+**Status:** Superseded in part by #23. The multi-room *schema* below stands; the
+create-room affordance and the switcher do **not** — do not build them.
 
 **Decision.** The schema stays multi-room. The UI ships a create-room affordance in the
 zero-room empty state and a switcher only when a user actually has more than one room. No
@@ -588,3 +592,226 @@ owner in Cloud Shell, where gcloud is already installed and already authenticate
 - The workflow needs `permissions: id-token: write`, and that permission is granted in
   the deploy job only.
 - The `ci.yml` checks workflow from #18 is unaffected and still runs on PRs and pushes.
+
+---
+
+## 23. One Data Room per owner: no create-room affordance, no switcher
+
+**Status:** Accepted. Supersedes the UI half of #21; the multi-room *schema* of #21 is
+unchanged.
+
+**Context.** #21 justified a create-room affordance by a condition that no longer holds:
+it assumed the auto-provisioned room might be cut, which would strand a fresh account
+with no room and no way to make one. Phase 1 shipped `DataRoomService.ensureProvisioned`
+instead — idempotent, and run on every sign-in — so a signed-in user always owns exactly
+one room.
+
+That makes three planned pieces unreachable by construction:
+
+- the zero-room empty state — `dataRooms` is never empty,
+- the room switcher — `GET /api/me` returns `listOwnedBy` only, and a room reached
+  through a Share is never one the caller owns, so the count never exceeds one,
+- `POST /api/rooms` — nothing would call it.
+
+**Decision.**
+
+> A user owns exactly one Data Room, provisioned on first sign-in. No create-room route,
+> no room list, no switcher, no room rename.
+
+The schema stays multi-room and `dataRooms` stays an array — both cost nothing and both
+are what makes the limitation a UI choice rather than a remodelling job.
+
+**Rationale.** `BRIEF.md` never asks to manage rooms, and #1 forbids building outside the
+requirements. An unreachable screen still carries the full definition of done — loading,
+empty and error states — so it is not free; it is roughly half a session spent on a branch
+no reviewer can enter.
+
+**Consequences.**
+
+- The last Phase 2 checkbox is removed from `roadmap.md`. The rest of Phase 2 is untouched.
+- `dataRooms: []` becomes an *error* state, not an empty state: it means provisioning
+  failed or a row was removed by hand, and the shell says so rather than offering a
+  create button it does not have.
+- Sharing a whole Data Room is unaffected — the share dialog offers "this Data Room" as a
+  scope (#21), which targets `Share.nodeId IS NULL`.
+- Reversing this is cheap: the repository already has `create`, so the affordance is a
+  controller method and a dialog if it is ever wanted.
+
+---
+
+## 24. Browser response: aggregates travel with what you are looking at
+
+**Status:** Accepted. Refines #13, which fixed the response shape before there was
+anything to put in it.
+
+**Context.** Phase 1 served the room's `totalSize / fileCount / folderCount` from
+`GET /api/me`, where they were free — nothing could change them. From Phase 2 every
+folder create and delete does, so the shell's *identity* query would have to be
+invalidated by content mutations, and the same three numbers would live in two caches.
+
+Separately, #13 says omitting `nodeId` means the room root — but the room root has no row
+in `nodes`, and the shape never said what fills `node` there.
+
+**Decision.**
+
+```
+GET /api/rooms/:roomId/nodes/:nodeId?
+  →  { room?, node, breadcrumbs, children, nextCursor, role }
+
+  node: null        this is the root — there is nowhere further up
+  breadcrumbs: []   at the root
+  room              present only when `scope.rootNodeId === null`
+  role              'OWNER' | 'VIEWER', straight off the AccessScope
+```
+
+`role` travels with every response because the same route serves the owner and the
+recipient of a `USER` share, and the client has nothing else to hide "New folder",
+"Rename" and "Delete" behind. It is already resolved; returning it costs nothing.
+
+**One private route serves both.** A `USER` share has no token — a CHECK constraint
+forbids one — so `/s/:token` cannot serve its recipient, and they browse
+`/rooms/:roomId/n/:nodeId` like the owner. That is exactly what `AccessScope` is for: the
+same query path, a different boundary. A third controller would add no property that the
+scope does not already provide; the separate DTOs of #9 divide the *anonymous* surface
+from the authenticated one, not the owner from the grantee.
+
+**Therefore the route never decides whether a room exists.** It asks this endpoint and
+renders what the API answers, including its `404`. Deriving existence from `/api/me`
+— as `rooms.$roomId.tsx` does today — locks a recipient out of a room they have a valid
+grant on, because `/api/me` lists rooms the caller *owns*, not rooms they can *reach*.
+Phase 2 replaces that component, so the rule has to be in place before it is rewritten,
+not after.
+
+- `GET /api/me` narrows to `{ user, dataRooms: [{ id, name }] }` — identity and what
+  exists, nothing about content.
+- Aggregates arrive with the thing being viewed: from `room` at the root, from the `Node`
+  row inside a folder. One mutation invalidates one key, and the header and the table
+  refetch together instead of drifting.
+- `node: null` rather than a synthetic root node: a fake row with a fabricated id
+  eventually gets treated as a real one.
+
+**`room` is conditional, and that is a security property, not a convenience.** A signed-in
+recipient of a `USER` share browses the *private* route — a `USER` share has no token, so
+`/s/:token` cannot serve them — and `room.name` (`Project Falcon`) sits above their scope
+root. Making `room` unconditional now would mean removing it again in Phase 4.
+
+**Consequences.**
+
+- A folder's own subtree totals are on screen wherever a folder is, which is the README
+  question the brief grades, demonstrated rather than asserted.
+- Room and node URLs stay ordinary UUID paths: they are guarded by the session and
+  `AccessScope`, never by secrecy. Only `/s/:token` is a capability, which is why it alone
+  is `randomBytes(32)` stored hashed (#7).
+
+---
+
+## 25. Writes are guarded in the service, and refused with `404`
+
+**Status:** Accepted.
+
+**Context.** #9 makes `AccessScope` a boundary that every query is confined to, which
+answers *what a caller can see*. It never answers *what a caller may change* — until now
+nothing else could, because the only principal was the owner. Decision #24 changed that:
+the recipient of a `USER` share browses the same private route, holding a valid
+`AccessScope` with `role: VIEWER`, inside someone else's Data Room. #24 also returns
+`role` so the client can hide "New folder", "Rename" and "Delete".
+
+Hiding a button is not access control. Without a server-side check, a `VIEWER` could
+create, rename and delete inside the owner's subtree with a shell one-liner, and the
+share the brief calls **read-only** would be read-write.
+
+**Decision.**
+
+> Every node mutation asserts `scope.role === 'OWNER'` as its first statement, in the
+> service, and refuses with `404`.
+
+- **In the service, not a Nest guard.** A decorator-based guard would have to read the
+  `AccessScope` off the request, and `architecture.md` refuses to put it in ambient state
+  — scopes are passed explicitly, which is what makes them impossible to forget or fake.
+- **`404`, not `403`,** consistently with the rest of the design: a `403` on a node a
+  caller can see but not change is harmless here, but two codes for one boundary is how
+  the one case that *does* leak gets written by analogy later.
+
+**Consequences.**
+
+- The check is per-mutation and mechanical, which makes its absence visible in review.
+- `EDITOR` (#7, #5's README answer) slots in as a role comparison in the same line; no
+  structural change.
+- The public `/s/:token` surface is unaffected — it is read-only by construction, having
+  no mutation controller at all.
+
+---
+
+## 26. Integration tests ship with the code they exercise
+
+**Status:** Accepted. Amends the *timing* half of #16; its content and scope are unchanged.
+
+**Context.** #16 placed both test sets at the end of Phase 4, on one rationale: that is
+where `AccessControlService` reaches its final shape. That is true of the **unit** set,
+which tests exactly that service. It was never true of the **integration** set — of its
+four tests, two exercise Phase 2 code (subtree delete, `23505` on rename) and two exercise
+Phase 3 code (`23505` on upload, move cycle guard). None touches the shape of
+`AccessControlService`; they were batched along for the ride.
+
+The cost of that ride is concrete. The subtree delete's failure mode — a second delete
+decrementing ancestor aggregates twice, because the raw statement bypasses the soft-delete
+extension — is silent, and it surfaces as wrong numbers in the delete warning, which
+`BRIEF.md` grades. Batching leaves that code unverified for two phases.
+
+**Decision.**
+
+> Each integration test lands in the phase that writes the code it covers. The unit set
+> stays in Phase 4, where #16 correctly puts it.
+
+**Consequences.**
+
+- Phase 2 builds the harness (compose Postgres, migrations, per-test cleanup) and pays
+  roughly 40 minutes it would otherwise not spend. The harness is paid for once either
+  way, so Phase 3's two tests then cost almost nothing.
+- The tests stop being a single end-of-Phase-4 block, which is the shape work takes when
+  it becomes the implicit cut — the outcome #16 was written to avoid, arrived at by a
+  different route.
+
+---
+
+## 27. A `USER` share carries no token; the two resolution paths stay separate
+
+**Status:** Accepted. Resolves a contradiction between #7 and #16 in favour of #7's
+schema; supersedes the "`USER` token mode branch" wording in #16.
+
+**Context.** #7's schema and the shipped `shares_mode_check` constraint keep `token_hash`
+null on every `USER` row. #16 and the Phase 4 plan, meanwhile, described a
+`resolveForToken` that *branches on `share.mode`*, with `USER` requiring a session whose
+verified email matches `granteeEmail` — the "invite link" pattern, where the owner sends a
+URL that only the named person can open.
+
+Both cannot be true. A token can never find a `USER` share, because no `USER` share has a
+token hash to find it by. The branch is unreachable, and an agent implementing the plan
+literally would either build dead code or relax the constraint to make it live.
+
+**Decision.**
+
+> A `USER` share has no token. `resolveForToken` serves `LINK` shares only and has no
+> `mode` branch. A `USER` grant is resolved solely by `resolveForUser`, through the
+> ancestor-grant lookup, against a verified session email.
+
+Discovery is the "Shared with me" listing, which reads the grantee's rows by
+`(granteeEmail, revokedAt)` and already holds both `dataRoomId` and `nodeId` — enough to
+link straight to `/rooms/:roomId/n/:nodeId`, or to `/rooms/:roomId` with no `/n/` segment
+when `nodeId` is null, which is how a whole-room grant is stored.
+
+**Rationale.** The invite-link pattern is the nicer product, and it was rejected only on
+cost and scope: it needs a migration relaxing a CHECK constraint that `data-model.md` does
+not describe, which is a schema change this project treats as a stop-and-ask. It buys
+convenience of *delivery*, while `BRIEF.md` asks only that a permissioned share be
+viewable by the specific users granted access — which this satisfies without it.
+
+**Consequences.**
+
+- Only `LINK` tokens exist, so `randomBytes(32)` and the stored hash (#7) protect the one
+  thing that is genuinely a capability.
+- The permissioned share stays gradable on one Google account: the Phase 4 seed creates a
+  `USER` share to the reviewer's verified email on first login, so "Shared with me" is
+  populated the moment they arrive.
+- `Share.tokenHash` remains nullable and the CHECK constraint unchanged, so reversing this
+  later is a migration plus one branch, not a remodelling.

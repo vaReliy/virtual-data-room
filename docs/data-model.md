@@ -240,10 +240,19 @@ These are the things that can silently drift. Each has an owner in code and a re
 | Invariant | Maintained by | Repair |
 |---|---|---|
 | `path` = parent's `path` + own id + `/` | node create, node move | `recompute` script |
-| folder aggregates = sum over live subtree | create, delete, move, restore | `recompute` script |
-| `DataRoom` aggregates = root-level sum | same four call sites | `recompute` script |
+| folder aggregates = sum over live subtree | create, delete, upload completion, move | `recompute` script |
+| `DataRoom` aggregates = whole-room totals | the same four call sites | `recompute` script |
 | a `FILE` always has a `READY` blob | upload completion | orphan sweep |
 | no cycles | move guard: reject if `newParent.path.startsWith(node.path)` | n/a (prevented) |
+| a node under a deleted ancestor is itself deleted | subtree delete stamps the whole range in one statement | `recompute` script |
+
+The last one is an assumption, not a constraint the database enforces, and it is the one
+the `410` design rests on. Reads check `deletedAt` on the node itself; walking its
+ancestors on every request would be a second query for a state that must not exist. So a
+live row under a deleted ancestor would be missing from its parent's listing and still
+readable by direct id — a deleted document served to a counterparty. It holds only while
+subtree delete stays the single writer of `deleted_at` on `nodes`: a second path (a
+restore cascade, a hand-run `UPDATE` during debugging) breaks it silently.
 
 `pnpm db:recompute` rebuilds `path` and every aggregate from `parent_id` and blob sizes.
 It exists so that a drift is an operational annoyance rather than a data-integrity
@@ -261,9 +270,13 @@ at its boundary. Safe by a wide margin: the 200 MB quota is ~45 million times be
 `Number.MAX_SAFE_INTEGER`. `BigInt` stays in the database.
 
 **Prisma needs two connection strings on Neon.** `DATABASE_URL` is the pooled string used
-at runtime; `DIRECT_URL` is the direct one, declared as `directUrl` in the datasource block
-and used for migrations — PgBouncer in transaction mode cannot carry the session-level
-statements that `prisma migrate` issues.
+at runtime; `DIRECT_URL` is the direct one, used for migrations — PgBouncer in transaction
+mode cannot carry the session-level statements that `prisma migrate` issues.
+
+Prisma 7 no longer takes either on the `datasource` block, which is what actually shipped:
+the pooled connection is handed to the driver adapter in `prisma.service.ts`, and the
+direct one is declared in `prisma.config.ts`. The two-connection split is unchanged — only
+where each is declared.
 
 ## How it scales (answers to the brief's README questions)
 
@@ -278,7 +291,20 @@ await tx.node.updateMany({
   where: { id: { in: ancestorIds } },
   data: { totalSize: { increment: delta }, fileCount: { increment: 1 } },
 });
+
+// The room counters are NOT covered by the statement above: a root-level node has no
+// ancestors at all, so `ancestorIds` is empty and nothing would be updated. They are
+// whole-room totals, so this runs on every mutation, in the same transaction.
+await tx.dataRoom.update({
+  where: { id: dataRoomId },
+  data: { totalSize: { increment: delta }, fileCount: { increment: 1 } },
+});
 ```
+
+Both updates belong to `applyAggregateDelta`, and both are inside the caller's
+transaction. Splitting them is how the room's figures drift away from the tree's — and
+since decision #24 those figures are what the browser header renders at the room root, so
+the drift is visible rather than latent.
 
 Reads are free. The exact figure is also derivable at any time — which is what the
 recompute script does:

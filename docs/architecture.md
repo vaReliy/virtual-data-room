@@ -100,6 +100,33 @@ instead of hitting an error.
 This matters concretely: in an M&A context a folder name (`Project Falcon`,
 `Acme Legal`) is itself confidential.
 
+**Reading a node by id has exactly one door.** `NodeRepository.findInScope(scope, id)` is
+it, and it always returns soft-deleted rows, with `deletedAt` in the result type:
+
+```sql
+SELECT ... FROM nodes
+WHERE id = $1 AND data_room_id = $2 AND path LIKE $3 || '%'
+--    no `deleted_at IS NULL` — that omission is the whole of the bypass
+```
+
+Two properties follow from the shape rather than from discipline:
+
+- The scope boundary stays in the `WHERE` clause, so the ordering the error contract
+  requires — scope before deletion — is structural. The statement cannot return an
+  out-of-scope row, which makes the `410` branch unreachable from outside the scope.
+- There is no soft-delete-filtering twin to reach for by mistake. A second, "safe"
+  `findById` is precisely how a `410` silently decays into a `404`; every caller is
+  instead forced by the return type to handle `deletedAt`. Callers are the read path
+  (folder browser, file preview) and every mutation — on rename in particular the race is
+  likelier, since the dialog sits open for seconds.
+
+It must be raw SQL: the extension overwrites any caller-supplied `deletedAt` (deliberately
+— that is what makes it unforgettable), so there is no argument-level opt-out. Living in
+`node.repository.ts` keeps it inside the file where raw SQL is already permitted.
+
+The listing of a folder's children is unaffected and goes through the extension normally:
+deleted children simply are not there.
+
 ## Upload flow
 
 Three steps, because bytes go straight to storage (Vercel's 4.5 MB body limit and
@@ -113,6 +140,7 @@ request timeouts never apply, and egress does not run through the API).
                because DataRoom.totalSize is already denormalized.
                This check is advisory: it gives fast feedback, but the
                authoritative one runs inside the locked transaction in step 3.
+   → `parentId` must resolve to a live FOLDER (see § Node endpoints), else 422
    → create Blob rows with status = PENDING
    → return per file: { blobId, uploadUrl }
 
@@ -165,6 +193,142 @@ Deliberate status codes, because the frontend renders a different state for each
 
 Note that 404 rather than 403 is intentional for missing grants: a 403 would confirm
 that a given document exists.
+
+**Revocation is `410` for a `LINK` share and `404` for a `USER` share**, and the asymmetry
+is deliberate rather than an oversight. The two modes differ in what the capability *is*.
+For `LINK` the capability is the token, so `410` says "this address is dead" while naming
+no node — its holder already knew the address once worked. For `USER` the capability is
+the grant row, and revoking it must return the grantee to the state the table above
+already defines as `404`, "signed in but lacking a grant". A `410` there would tell a
+revoked grantee, permanently, that the document still exists — which is the one thing
+revocation is supposed to stop.
+
+### Order of checks
+
+Two rows above can match the same request, so the order in which they are evaluated is
+part of the contract, not an implementation detail. Resolving a node runs:
+
+1. `findInScope(scope, id)` — one statement, scope-bounded in its `WHERE`, returning
+   soft-deleted rows.
+2. No row → `404`. This covers both "no such node" and "outside your scope": the
+   statement cannot tell them apart, which is the point.
+3. A row with `deletedAt` set → `410`.
+
+There is deliberately no application-level path check here. An earlier draft of this list
+described an unscoped load followed by comparing `node.path` against `scope.rootPath` in
+TypeScript — do not implement that. It rebuilds the `findById` that must not exist, and it
+moves the boundary out of SQL and into a line someone can forget.
+
+**Scope is checked before deletion, and that ordering is load-bearing.** Reversed, a
+caller who guesses a UUID outside their scope gets `410` for a node that was deleted and
+`404` for one that never existed — which tells them the node existed. Beyond the caller's
+scope the two states must stay indistinguishable, exactly as with 404-not-403 above.
+
+`410` is therefore only ever seen by someone who was entitled to see the node alive.
+
+### `410` on both node types, two different screens
+
+The status does not vary by node type; the screen does. Both are dead ends with a way
+back, so nothing moves under the reader:
+
+- **File preview** → "This file was deleted by the owner", with a link to its folder.
+- **Folder browser** → "This folder was deleted by the owner", with a link to the Data
+  Room root. No auto-redirect: the nearest live ancestor cannot be derived, since the
+  subtree delete stamps every ancestor in the same statement, so any bounce would land at
+  the room root anyway.
+
+This is the edge case `BRIEF.md` names — a folder deleted while someone else is viewing
+it. Returning `404` for it would be indistinguishable from a mistyped id, leaving the
+viewer to conclude the application is broken. Note it fires only for a caller standing
+*inside* the folder: a deleted child simply disappears from its parent's next listing.
+
+## Node endpoints
+
+The browser read is decision #24. The three mutations are spelled out here because
+everything about them is a guess otherwise — and a guess about a status code becomes a
+screen that never renders.
+
+All four sit under `/api/rooms/:roomId/nodes`, behind `JwtAuthGuard`. Each resolves an
+`AccessScope` first; each mutation then asserts `scope.role === 'OWNER'` and refuses with
+`404` (decision #25).
+
+| | Method | Body | Success |
+|---|---|---|---|
+| Browse | `GET /:nodeId?` | — | `200` `{ room?, node, breadcrumbs, children, nextCursor, role }` |
+| Create folder | `POST` | `{ parentId: uuid \| null, name }` | `201` the created node |
+| Rename | `PATCH /:nodeId` | `{ name }` | `200` the updated node |
+| Delete subtree | `DELETE /:nodeId` | — | `204` |
+| Move | `POST /:nodeId/move` | `{ parentId: uuid \| null }` | `200` the updated node |
+
+- **Create takes no `type`.** Phase 2 creates folders only; a `FILE` node is born in
+  `POST /uploads/complete`, never here, because it cannot exist without a `READY` blob.
+- `parentId: null` means the room root. A `parentId` that is soft-deleted or outside the
+  scope follows the ordinary resolution above — `410` and `404` respectively.
+- **`parentId` must resolve to a live `FOLDER`, or `422`.** Nothing in the database
+  prevents a child under a `FILE`: `nodes_type_blob_check` ties `type` to `blob_id`, and
+  the parent foreign key does not look at the parent's type at all. Unreachable in Phase 2,
+  where no `FILE` row exists yet — but the same check is owed by every later caller that
+  accepts a `parentId`, namely `POST /uploads/complete` and the move destination. A child
+  under a file breaks the tree quietly: breadcrumbs would route through a file, and a file
+  would have "contents".
+- **`23505` → `409` on both create and rename**, with no auto-suffix: the user typed the
+  name (decision #20). Prisma surfaces the partial unique index as `P2002`; catch the
+  raw `23505` as well, since the index is created in raw SQL rather than declared in the
+  schema.
+- **Delete replies `204`.** The warning dialog is rendered *before* the call, from the
+  folder's denormalized aggregates, so the response has nothing left to tell the client
+  that an invalidation does not.
+
+### Move
+
+Phase 3, specified here so that create, rename, delete and move share one description
+rather than three plus a guess.
+
+**A dedicated sub-resource, not a field on `PATCH`.** Folding `parentId` into the rename
+body makes `{ "parentId": null }` — move to the room root — indistinguishable from a
+`parentId` the client simply did not send, which is the difference between relocating a
+node and leaving it alone. The operation is also not a field write: it rewrites every
+descendant's `path` and transfers aggregates between two ancestor chains.
+
+| Situation | Status |
+|---|---|
+| Node or destination missing, or outside the scope | `404` |
+| Node or destination soft-deleted | `410` |
+| Destination is a `FILE`, or is the node itself or one of its descendants | `422` |
+| A live node of the same `lower(name)` already sits in the destination | `409` |
+| Destination is the node's current parent | `200`, a no-op |
+
+- **The cycle guard is `422`, not `409`.** A conflict is a name the user can change; a
+  cycle is a request that cannot be satisfied at all, and the dialog says so differently.
+  The guard is `newParent.path.startsWith(node.path)`, which also catches moving a node
+  into itself, with no query.
+- **No auto-suffix on conflict** — the user chose the destination knowing its contents
+  (decision #20), so this is `409` with the rename/cancel dialog, exactly as rename is.
+- **One transaction** covers the parent change, the descendant `path` rewrite, and both
+  halves of the aggregate transfer.
+- **The transferred delta is the whole subtree**, not one node: a moved folder carries its
+  `totalSize`, `fileCount` and `folderCount` off the old ancestor chain and onto the new
+  one, plus itself as one folder. Reading those figures off the moved row is what keeps
+  this a single statement per chain rather than a subtree scan.
+- `BRIEF.md` only requires moving a **file**, and no phase builds a folder-move UI. The
+  endpoint and the guard are type-agnostic regardless, because the repository method is
+  shared — which is what the Phase 3 cycle-guard test exercises directly.
+
+### `nodeNameSchema`
+
+One schema in `packages/contracts`, used by the create and rename bodies, and by the
+`react-hook-form` resolver on both dialogs, so the client and the server reject the same
+strings for the same reasons.
+
+- `.trim()` first — normalization at the edge (decision #12), so `"Legal "` and `"Legal"`
+  cannot both exist and confuse the uniqueness index.
+- 1–255 characters after trimming; empty is `422`, not a silent no-op.
+- Rejects `/`, NUL and C0 control characters, and the names `.` and `..` — none of them
+  reach storage (object keys are UUIDs), but all of them make a breadcrumb or a download
+  filename behave strangely.
+- Case is preserved for display, while uniqueness is on `lower(name)`. Renaming `Legal`
+  to `legal` therefore succeeds and is not a `409`: the only row holding that index key is
+  the row being updated, so it does not collide with itself.
 
 ## Frontend structure
 

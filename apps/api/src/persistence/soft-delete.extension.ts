@@ -12,10 +12,16 @@ import { Prisma } from '../generated/prisma/client';
  *    `node.repository.ts` must therefore filter `deleted_at IS NULL` itself. The subtree
  *    delete is the one that bites: without it a second delete re-stamps already-deleted
  *    rows and decrements ancestor aggregates twice.
- *  - **The two intentional bypasses** — `findIncludingDeleted` and the `dataRoomId`
- *    lookup in `AccessControlService` — need to see deleted rows, because `404` (never
+ *  - **The two intentional bypasses** need to see deleted rows, because `404` (never
  *    existed) and `410` (deleted while you were looking at it) are different states with
- *    different screens. Those call `$queryRaw` or the unextended client on purpose.
+ *    different screens. Both call `$queryRaw` on purpose — note that the injected
+ *    `deletedAt: null` below overwrites a caller-supplied one, so there is no
+ *    argument-level opt-out by design.
+ *      1. `NodeRepository.findInScope(scope, id)` — the only way to read a node by id.
+ *         Still scope-bounded in SQL; it drops just the `deleted_at` predicate.
+ *      2. The `dataRoomId`-bounded lookup that takes no `AccessScope`, used to resolve a
+ *         grant from a target node's ancestors. It arrives with sharing, not before —
+ *         owner resolution never reads a node.
  */
 const SOFT_DELETABLE_MODELS = ['DataRoom', 'Node'] as const;
 
