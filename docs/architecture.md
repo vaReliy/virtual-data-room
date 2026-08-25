@@ -39,7 +39,7 @@ apps/api/src/
     auth/          controller, google strategy, jwt strategy, guards, session
     data-room/     controller, service, repository
     node/          controller, service, node.repository   (tree + raw SQL lives here)
-    file/          controller, service                    (upload orchestration)
+    file/          controller, service, blob.repository   (upload orchestration)
     share/         controller, service, repository
     public/        public-share.controller                (anonymous /s/:token surface)
   access/
@@ -145,6 +145,7 @@ implementation detail — stop and ask.
 | `DataRoomRepository.findInScope` | Bounded by `scope.dataRoomId`, with no path predicate. | A Data Room is the scoping boundary itself; there is no ancestry to clip. Whether the room may be *shown* is the caller's decision, and `NodeService` makes it only when `scope.rootNodeId === null`. |
 | `DataRoomRepository` — `listOwnedBy`, `countOwnedBy`, `create`, `findOwnedById` | Take no `AccessScope`. | `ownerId`. These run *before* a scope exists: `findOwnedById` is what `AccessControlService` uses to produce one. |
 | `UserRepository` | Takes no `AccessScope`. | Identity. There is no tree to bound, and the caller is by definition the row's subject. |
+| `BlobRepository` | Takes `scope.dataRoomId`, not a full `AccessScope`. A blob has no `path` and no ancestry to clip. | `id` plus `storageKey: { startsWith: dataRoomId + '/' }` — Prisma, **not** raw SQL, so the raw-SQL rule and its ESLint boundary are untouched; `startsWith` still compiles to a `LIKE` in the `WHERE` clause, which is the property that matters. `Blob` carries no `dataRoomId` column, so the key *is* the tenancy — which is why its format is a decision (#28) and not a convention. Without the predicate a caller could attach another room's blob to their own node. `Blob` is not in `SOFT_DELETABLE_MODELS`, so the extension leaves these reads alone. |
 
 One more is already known and deliberately absent, because it would have no caller yet:
 the `dataRoomId`-bounded node lookup that resolves a grant from a target node's ancestors
@@ -156,42 +157,83 @@ sharing, and owner resolution never reads a node.
 Three steps, because bytes go straight to storage (Vercel's 4.5 MB body limit and
 request timeouts never apply, and egress does not run through the API).
 
+Both endpoints sit **under the room** (decision #28). The earlier `/api/uploads/*` spelling
+predates the `/rooms/:roomId/…` space and left no room id in the request at all, which
+`AccessControlService.resolveForUser` needs and which `parentId: null` — a drop at the room
+root — cannot supply.
+
 ```
-1. POST /api/uploads/presign
-     { parentId, files: [{ name, size, mimeType }] }
+1. POST /api/rooms/:roomId/uploads/presign
+     { parentId, files: [{ name, size, mimeType }] }        <- a batch
    → validate: mime is application/pdf, size ≤ 10 MB, ≤ 10 files,
                Data Room quota (200 MB) not exceeded — a single integer comparison,
                because DataRoom.totalSize is already denormalized.
                This check is advisory: it gives fast feedback, but the
                authoritative one runs inside the locked transaction in step 3.
    → `parentId` must resolve to a live FOLDER (see § Node endpoints), else 422
-   → create Blob rows with status = PENDING
+   → create Blob rows with status = PENDING, storageKey = `${dataRoomId}/${blobId}`
    → return per file: { blobId, uploadUrl }
 
 2. browser → PUT uploadUrl  (direct to GCS / MinIO)
    → progress via XMLHttpRequest.upload.onprogress   (fetch has no upload progress)
 
-3. POST /api/uploads/complete
-     { blobId, parentId, name }
-   → HEAD the object: take the REAL size and content type from storage,
-     never trust the client's numbers (they feed the aggregates)
+3. POST /api/rooms/:roomId/uploads/complete
+     { blobId, parentId, name }                            <- one file, not a batch
+   → HEAD the object, OUTSIDE the transaction: take the REAL size and content type
+     from storage, never trust the client's numbers (they feed the aggregates)
    → reject and delete the object if it violates the limits
-   → Blob.status = READY
-   → create the Node, resolving name conflicts (see below)
+   → open the transaction: pg_advisory_xact_lock(hashtextextended(dataRoomId, 0)),
+     authoritative quota check, Blob.status = READY, node insert, aggregate delta
    → applyAggregateDelta(ancestorIds, { size: +n, files: +1 })
 ```
+
+**Why presign batches and complete does not** (decision #28). Every presign check is
+set-level: `≤ 10 files` constrains the set, and the quota compares the batch's summed size
+against what the room has left. Complete has no set-level check — each file carries its own
+`HEAD`, its own blob and its own name conflict, and each lands at its own moment, which is
+what per-file progress needs. Batching it would push per-file `422` out of the HTTP status
+and into an envelope, and would make the auto-suffix retry re-run the whole batch.
+
+**Complete is idempotent.** The `PENDING → READY` flip is a conditional
+`UPDATE … WHERE id = $1 AND status = 'PENDING' RETURNING …` inside the transaction; zero
+rows means it already ran, so the node already pointing at that blob is looked up by
+`blobId` and returned with `200`. A lost response over a committed transaction otherwise
+produces two nodes on one blob and charges the aggregates twice.
+
+**A blob's tenancy is its key.** `Blob` has no `dataRoomId` column, so `blob.repository.ts`
+takes `scope.dataRoomId` and adds `storageKey: { startsWith: dataRoomId + '/' }` beside the
+id lookup. Without it, a caller could attach another room's `blobId` to their own node. This
+is a Prisma predicate, **not** raw SQL: `startsWith` compiles to `LIKE` in the `WHERE`
+clause, so the boundary stays in the query while `node.repository.ts` remains the only file
+permitted raw statements.
 
 GCS's S3-compatible XML API supports presigned **PUT** but not S3's POST policy
 documents, so limits are enforced at steps 1 and 3 rather than by the storage service.
 Compensating controls: the quota check, a rate limit of 20 presign requests per minute
 per user, and the `HEAD` verification.
 
-**Orphaned blobs.** A client that never reaches step 3 leaves a `PENDING` blob. Sweeping
-`PENDING` rows older than an hour is a scheduled job; for this project it is described
-in the README rather than implemented.
+**The rate limit is keyed on the session `userId`, not on the IP.** `@nestjs/throttler`
+tracks `req.ip` by default, and behind the Vercel rewrite that is the proxy's address for
+every caller — one user uploading a batch would throttle everyone. `getTracker` is
+overridden to return the user id. Because presign batches ten files, twenty requests a
+minute means two hundred files: a legitimate user cannot reach it, which is why `429` is a
+plain per-file error row rather than a retry-with-backoff path.
+
+**Unreferenced bytes accumulate in two ways, and nothing collects them** (decision #28). A
+client that never reaches step 3 leaves a `PENDING` blob; a deleted file leaves a `READY`
+one, because soft delete never touches storage. One scheduled sweeper would collect both —
+`PENDING` older than an hour, and `READY` whose nodes are all soft-deleted. It is described
+in the README rather than implemented, and the visible consequence is that the quota, which
+counts node aggregates, can read lower than what the bucket actually holds.
 
 **Downloads and previews** use short-lived presigned GET URLs (`expiresIn: 300`), so a
-leaked URL dies in five minutes and cannot be hot-linked from another site.
+leaked URL dies in five minutes and cannot be hot-linked from another site. They are
+fetched from `GET /api/rooms/:roomId/nodes/:nodeId/content`, which returns
+`{ url, expiresAt }` as JSON rather than redirecting: a `302` would remove the stale-cache
+risk decision #15 guards against, but it would contradict #15's stated mechanism and needs
+`Cache-Control: no-store` on the redirect itself to avoid recreating the same bug one level
+down. The endpoint resolves the node through `resolveLiveNode`, so a deleted file is a
+`410` and one outside the scope a `404`, with no code of its own.
 
 ## Name conflicts
 
@@ -213,6 +255,7 @@ Deliberate status codes, because the frontend renders a different state for each
 | Share link revoked or expired | `410 Gone` | "This link is no longer available" |
 | Name already taken on rename/move | `409 Conflict` | Inline conflict dialog |
 | Quota exceeded, file too large, wrong type | `422` | Per-file error in the upload queue |
+| Presign rate limit exceeded | `429` | Per-file error row; no automatic retry |
 | Signed in but lacking a grant | `404`, not `403` | Existence is information |
 
 Note that 404 rather than 403 is intentional for missing grants: a 403 would confirm
@@ -283,9 +326,14 @@ The browser read is decision #24. The three mutations are spelled out here becau
 everything about them is a guess otherwise — and a guess about a status code becomes a
 screen that never renders.
 
-All four sit under `/api/rooms/:roomId/nodes`, behind `JwtAuthGuard`. Each resolves an
+All of them sit under `/api/rooms/:roomId/nodes`, behind `JwtAuthGuard`. Each resolves an
 `AccessScope` first; each mutation then asserts `scope.role === 'OWNER'` and refuses with
-`404` (decision #25).
+`404` (decision #25). Reads do not: the content URL is a read, and a `VIEWER` must be able
+to open a file that was shared with them.
+
+Creating a `FILE` is deliberately not in this table. It happens in
+`POST /api/rooms/:roomId/uploads/complete`, because a file cannot exist without a `READY`
+blob and therefore cannot be born from a single request (decision #28).
 
 | | Method | Body | Success |
 |---|---|---|---|
@@ -294,16 +342,19 @@ All four sit under `/api/rooms/:roomId/nodes`, behind `JwtAuthGuard`. Each resol
 | Rename | `PATCH /:nodeId` | `{ name }` | `200` the updated node |
 | Delete subtree | `DELETE /:nodeId` | — | `204` |
 | Move | `POST /:nodeId/move` | `{ parentId: uuid \| null }` | `200` the updated node |
+| Content URL | `GET /:nodeId/content` | — | `200` `{ url, expiresAt }` |
 
 - **Create takes no `type`.** Phase 2 creates folders only; a `FILE` node is born in
-  `POST /uploads/complete`, never here, because it cannot exist without a `READY` blob.
+  `POST /api/rooms/:roomId/uploads/complete`, never here, because it cannot exist without a
+  `READY` blob (decision #28).
 - `parentId: null` means the room root. A `parentId` that is soft-deleted or outside the
   scope follows the ordinary resolution above — `410` and `404` respectively.
 - **`parentId` must resolve to a live `FOLDER`, or `422`.** Nothing in the database
   prevents a child under a `FILE`: `nodes_type_blob_check` ties `type` to `blob_id`, and
   the parent foreign key does not look at the parent's type at all. Unreachable in Phase 2,
   where no `FILE` row exists yet — but the same check is owed by every later caller that
-  accepts a `parentId`, namely `POST /uploads/complete` and the move destination. A child
+  accepts a `parentId`, namely `POST /api/rooms/:roomId/uploads/complete` and the move
+  destination. A child
   under a file breaks the tree quietly: breadcrumbs would route through a file, and a file
   would have "contents".
 - **`23505` → `409` on both create and rename**, with no auto-suffix: the user typed the

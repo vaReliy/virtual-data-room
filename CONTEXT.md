@@ -19,6 +19,14 @@ never separate entities.
 is a name and a position in a tree; a Blob is content. Separating them is what makes
 copies and future versioning possible.
 
+**Upload** — the three-step protocol that brings a `FILE` into existence: *presign*
+(creates a `PENDING` Blob; no Node exists yet), a direct `PUT` of the bytes to storage,
+and *complete* (verifies the stored bytes and creates the Node pointing at the Blob). It
+is the only operation that spans two entities, which is why it has a URL space of its own
+instead of living under `nodes`: a folder is created by one statement, a file by a
+protocol. Presign takes a batch because its limits are set-level; complete is per file,
+because every file lands at its own moment and fails on its own terms.
+
 **Share** — a grant of access, attached to a Node (or to a whole Data Room). Two
 `mode`s: `LINK` (anyone holding the URL) and `USER` (a specific email address). Carries
 a `role`. A share is never copied onto descendants — access to nested content is

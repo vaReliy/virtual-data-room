@@ -815,3 +815,88 @@ viewable by the specific users granted access — which this satisfies without i
   populated the moment they arrive.
 - `Share.tokenHash` remains nullable and the CHECK constraint unchanged, so reversing this
   later is a migration plus one branch, not a remodelling.
+
+---
+
+## 28. Upload is a protocol, not a request: URL space, blob tenancy, and bytes that outlive their node
+
+**Status:** Accepted. Fills in `architecture.md` § Upload flow, which was written before the
+`/rooms/:roomId/…` URL space existed (`4cf5e7c`, two doc iterations before `9152e06`
+introduced it) and therefore names no room in either endpoint.
+
+**Context.** `CONTEXT.md` is unambiguous that a Node is one entity with two types, so the
+obvious reading is that a `FILE` should be created by the same `POST /nodes` that creates a
+`FOLDER`, with a `blobId` attached. Phase 3 grooming considered exactly that and rejected
+it.
+
+**Decision.**
+
+> A `FILE` is not created by a request; it is created by a **protocol**, and the protocol
+> gets a URL space of its own under the room:
+> `POST /api/rooms/:roomId/uploads/presign` and `POST /api/rooms/:roomId/uploads/complete`.
+
+- **Presign takes a batch, complete takes one file.** This asymmetry is not an oversight.
+  Every presign check is *set-level* — `≤ 10 files` is a constraint on the set, and the
+  quota is `sum(sizes) + room.totalSize ≤ 200 MB`, which ten 30 MB files pass individually
+  and fail together. Complete has no set-level check at all: each file has its own `HEAD`,
+  its own blob, its own name conflict. A batched complete would also force per-file `422`
+  out of the HTTP status and into an envelope, and would inflate the auto-suffix retry unit
+  from one row to the whole batch — a `23505` on item 17 of 20 aborts and re-runs all 20,
+  with #20's bound of 3 now protecting twenty files instead of one.
+- **Complete is idempotent.** The `PENDING → READY` flip is a conditional
+  `UPDATE … WHERE id = $1 AND status = 'PENDING' RETURNING …` inside the transaction — not
+  a read followed by a write, which is the check-then-act shape F11 already rejected for the
+  suffix. Zero rows means the blob was completed before: look the existing node up by
+  `blobId` and return it with `200`. Without this, a lost response over a committed
+  transaction produces two nodes on one blob and charges the aggregates twice for bytes
+  that exist once.
+- **`storageKey` is `${dataRoomId}/${blobId}`** — no name, no extension. The id comes from
+  `randomUUID()` in application code before the insert, for exactly the reason
+  `createFolder` does it: a `NOT NULL` column containing the row's own id cannot wait for a
+  database-side default.
+- **That key is also the blob's tenancy.** `Blob` has no `dataRoomId` column, so a blob
+  belongs to no room until a node points at it — and nothing would otherwise stop a caller
+  from attaching another room's `blobId` to their own node. `blob.repository.ts` therefore
+  takes `scope.dataRoomId` (not a full `AccessScope`; a blob has no ancestry to clip) and
+  adds `storageKey: { startsWith: dataRoomId + '/' }` alongside the id lookup. No schema
+  change, and the boundary stays in the `WHERE` clause rather than in a TypeScript
+  comparison someone can forget. It needs **no raw SQL**: Prisma's `startsWith` compiles to
+  `LIKE`, so `node.repository.ts` stays the only file the ESLint rule permits raw statements
+  in, and `Blob` is absent from `SOFT_DELETABLE_MODELS`, so the extension does not touch it.
+- **Deleting a file never touches storage.** The alternative is not merely undesirable, it
+  is structurally impossible: `nodes_type_blob_check` requires `FILE → blob_id NOT NULL`, so
+  a soft-deleted file's blob row can be neither deleted (foreign key) nor detached (check).
+  Removing only the bytes would make a reversible operation irreversible in fact while
+  still looking reversible in the database — the failure #6 rates worst.
+
+**Rationale.** Create-folder is one `INSERT` and one aggregate delta. Upload-complete is
+`HEAD` → advisory lock → authoritative quota check → `status = READY` → node insert →
+aggregate delta → retry of the whole transaction up to three times. Folding them into one
+endpoint would put two failure surfaces under one `422`, which would then mean both "the
+parent is a file" and "the bytes in storage are not what you promised".
+
+The single-entity principle is not weakened by this: it is already honoured everywhere it
+costs nothing. Browse, rename, move and delete all operate on both node types with no
+branch on `type` at all. The asymmetry is in the *precondition* — a `FILE` cannot exist
+without a `READY` blob — not in the entity.
+
+**Consequences.**
+
+- `Upload` enters `CONTEXT.md` as a first-class term. It was the only URL space in the
+  system named after a process rather than a domain noun, and naming it fixes that in the
+  glossary rather than in the route.
+- **The name is not the type, anywhere.** Object keys are UUIDs, the stored content type is
+  set at `PUT`, and the presigned GET pins `response-content-type`. A file's extension takes
+  part in no decision the system makes, so rename does not police it: `contract.pdf` may
+  become `contract.txt` and will still render as a PDF. Enforcing the extension would
+  require `nodeNameSchema` to branch on node type, and it is deliberately one schema that
+  does not know types. `response-content-disposition` carries `node.name`, RFC 5987 encoded.
+- **The quota is computed from node aggregates, not from the bucket**, and after this
+  decision the two are allowed to disagree: a room can report 0 bytes used while holding
+  real objects in GCS. Nothing breaks — the authoritative check reads the same aggregates —
+  but two categories of unreferenced bytes now accumulate, `PENDING` blobs from abandoned
+  transfers and `READY` blobs under soft-deleted nodes. One scheduled sweeper collects both;
+  it is described in the README and not built (Phase 6).
+- A new row is owed to the scope-exception inventory for `blob.repository.ts`, and the
+  layer diagram gains a repository under `file/` — the only module that writes to the
+  database without one.

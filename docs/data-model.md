@@ -160,7 +160,7 @@ model Node {
 
 model Blob {
   id         String     @id @default(uuid()) @db.Uuid
-  storageKey String     @unique                   // object key in GCS / MinIO
+  storageKey String     @unique                   // `${dataRoomId}/${blobId}` — see #28
   mimeType   String
   size       BigInt
   checksum   String?
@@ -263,6 +263,15 @@ incident, and it is worth mentioning in the README.
 second delete re-stamps rows already deleted and decrements ancestor aggregates for them
 twice, giving wrong counts in the delete-warning dialog. Derive the aggregate delta from
 the same statement via `RETURNING type, size` so the two cannot disagree.
+
+**A blob's `storageKey` is its tenancy.** `Blob` has no `dataRoomId` column — a blob
+belongs to no room until a node points at it — so the key format `${dataRoomId}/${blobId}`
+is load-bearing rather than cosmetic (decision #28). `BlobRepository` filters
+`storageKey: { startsWith: dataRoomId + '/' }` beside the id lookup, which is what stops a
+caller attaching another room's blob to their own node. The same prefix is what a storage
+sweeper would list by. Like a node's `path`, the key contains the row's own id and is
+`NOT NULL`, so the id comes from `randomUUID()` in application code before the insert — a
+database-side default is not known in time.
 
 **Sizes on the wire are `number`, not `BigInt`.** `JSON.stringify` throws on `bigint`, so
 `packages/contracts` defines `size` / `totalSize` as `number` and the repository converts

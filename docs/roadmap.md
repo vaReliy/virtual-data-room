@@ -250,6 +250,30 @@ excluding already-deleted rows; and `23505` mapping to `409` on create and renam
 on both the presigned PUT and GET; the presigned GET never served from cache; and the
 auto-suffix retry re-running the whole transaction rather than the statement.
 
+**Run this phase as two sessions**, on the same principle as the last two: the boundary sits
+where the *kind* of work changes.
+
+| Session | Sections | Gate |
+|---|---|---|
+| **S1 Backend** | `StorageService`, throttler, `blob.repository.ts`, presign, complete, auto-suffix, content URL, `NodeRepository.createFile`, move endpoint, **the whole contract reshape** (limits, upload schemas, content response), both integration tests, mixed-data listing | `typecheck && lint && test` green, **and `StorageService` verified against the real GCS bucket** |
+| **S2 Web** | dropzone + file drag-and-drop, per-file progress and cancel, PDF preview, `NodeRoute` dispatch on `node.type`, the file `410` screen, rename / delete file, "Move to…" dialog, drag-and-drop move | the four file flows walked in a browser, each with its loading, empty and error states |
+
+The contract reshape is in S1 for the Phase 2 reason: S2 cannot start against a shape that
+is still moving.
+
+**The GCS verification moved into S1's gate, out of last place.** `response-content-type`
+and `response-content-disposition` are exactly the parameters whose GCS behaviour can differ
+from MinIO's, and the PDF preview is built on them. Verified last, a divergence surfaces
+after the preview is already written against MinIO; verified at the S1 gate, S2 builds
+against storage that is known good.
+
+Each session starts from its brief in gitignored `notes/issues/phase-3/issues/` and hands
+over through the code, the ticked boxes here, and `deviations.md` in that same directory.
+
+**Decision #28 settles what this phase's grooming opened**: the upload URL space, the
+batched-presign / per-file-complete asymmetry, complete's idempotency, `storageKey` as a
+blob's tenancy, and bytes that outlive their node. Read it before starting S1.
+
 **Carried in from the Phase 2 → 3 forward-compat pass.** Four things Phase 2 satisfies by
 accident, because it has only one node type and nothing that reads the quota:
 
@@ -287,17 +311,53 @@ Phase 3 turns that `<span>` into a `Link`.
       published 2025-12-02, so `minimum-release-age=10080` will not refuse it and there is
       nothing to raise early. Peer range covers `@nestjs/common ^11`. The rule still
       applies to anything else this phase reaches for on the day it needs it
-- [ ] `POST /uploads/presign`: validation, advisory quota check, `PENDING` blobs, rate
-      limit. `Content-Type: application/pdf` signed into the PUT
-- [ ] `POST /uploads/complete`: `HEAD` **before** the transaction opens; then
-      `pg_advisory_xact_lock(hashtextextended(dataRoomId, 0))`, authoritative quota check,
-      node insert, aggregate delta — all inside one interactive transaction
+- [ ] The four limits as constants in `packages/contracts`, beside the schemas:
+      `application/pdf`, 10 MB per file, 10 files per presign, a 200 MB room quota. They
+      exist only as prose in `architecture.md` today. Shared for the same reason
+      `nodeNameSchema` is — the dropzone must reject an oversized file *before* presign, and
+      a second hand-written copy of the numbers in the web app is how the two drift. The
+      quota stays a constant rather than an env var: it never differs by environment here,
+      and the README states it as an answer
+- [ ] `blob.repository.ts` under `modules/file/` — the only module that writes to the
+      database without a repository today. Takes `scope.dataRoomId` and adds
+      `storageKey: { startsWith: dataRoomId + '/' }` — **Prisma, not raw SQL**: `startsWith`
+      compiles to `LIKE`, so the boundary is in the `WHERE` clause and `node.repository.ts`
+      stays the only file the ESLint rule allows raw statements in. The
+      `randomUUID()`-before-insert pattern
+      arrives here for its second carrier: `storageKey` contains the blob's own id and is
+      `NOT NULL`, exactly as `path` does for a node (decision #28)
+- [ ] `POST /rooms/:roomId/uploads/presign`: validation, advisory quota check over the
+      **batch's summed size**, `PENDING` blobs, rate limit keyed on the session `userId` —
+      not `req.ip`, which behind the Vercel rewrite is the proxy for every caller.
+      `Content-Type: application/pdf` signed into the PUT
+- [ ] `POST /rooms/:roomId/uploads/complete`, **one file per call**: `HEAD` **before** the
+      transaction opens; then `pg_advisory_xact_lock(hashtextextended(dataRoomId, 0))`,
+      authoritative quota check, the conditional `PENDING → READY` flip, node insert via
+      `NodeRepository.createFile`, aggregate delta — all inside one interactive transaction.
+      Zero rows from the flip means complete already ran: return the existing node by
+      `blobId` with `200`, rather than creating a second node on one blob and charging the
+      aggregates twice
 - [ ] Auto-suffix on name conflict: optimistic insert, catch `23505`, retry the **whole**
-      transaction, bound 3, then `409`
-- [ ] Presigned GET with `response-content-type` + `response-content-disposition`
+      transaction, bound 3, then `409`. The bound is not infinite and it is visible — a
+      folder already holding `contract.pdf`, `contract (1).pdf` and `contract (2).pdf`
+      answers `409` on the fourth drop of that name. Correct per #20, worth a `CHANGELOG.md`
+      line because no diff shows it
+- [ ] `GET /rooms/:roomId/nodes/:nodeId/content` → `{ url, expiresAt }`, with
+      `response-content-type` + `response-content-disposition: inline` and `filename` set
+      from `node.name`, RFC 5987 encoded. It resolves through `resolveLiveNode`, so `404`
+      and `410` come for free. **Not guarded by `role`** — a `VIEWER` must be able to open a
+      file shared with them
+- [ ] Two stale doc comments still name the pre-#28 URL and will be read as authoritative:
+      `packages/contracts/src/node.ts:110` and `apps/api/src/modules/node/node.service.ts:96`
+      both say a `FILE` is born in `POST /api/uploads/complete`. The sentence stays true —
+      only the path changes. Fix them in the same commit as `createFile`
 - [ ] Dropzone: multiple files, **drag-and-drop**, per-file progress via `XMLHttpRequest`,
-      per-file error rows, cancel
-- [ ] PDF preview via `<iframe>`, presigned URL fetched with `staleTime: 0`
+      per-file error rows, cancel. **Native HTML5 DnD, no new dependency** — `DataTransfer`
+      is the only way to read dropped files anyway, and `dnd-kit` handles pointer drags but
+      not file drops, so a library would add a second mechanism rather than replace the
+      first. Keyboard users are served by the "Move to…" dialog (decision #19), not by DnD.
+      A cancelled transfer leaves a `PENDING` blob, which nothing collects — see Phase 6
+- [ ] PDF preview via `<iframe>`, content URL fetched with `staleTime: 0` / `gcTime: 0`
 - [ ] `NodeRoute` dispatches on `node.type` — `FILE` renders the preview, `FOLDER` the
       browser. Same route, no new one: the browse endpoint already answers for a file id
 - [ ] The deleted-**file** `410` screen, owed by Phase 2 and unscheduled until now
@@ -326,7 +386,38 @@ Phase 3 turns that `<span>` into a `Link`.
       the second one
 - [ ] Verify `StorageService` once against the real GCS bucket via an env flip (~10 min) —
       presign PUT/GET, CORS, and the `response-*` overrides, which are exactly the
-      parameters whose GCS behaviour can differ from MinIO's
+      parameters whose GCS behaviour can differ from MinIO's. **Part of the S1 gate, not the
+      end of the phase**: the preview is built on the `response-*` overrides, so a GCS
+      divergence found after S2 means rewriting UI that was correct against MinIO
+
+### Scope gates — where this phase stops
+
+Phase 3 sits between a finished folder browser and an unbuilt sharing model, which is the
+easiest place in this project to drift. Each line below is something a reasonable
+implementer might start unprompted. **None of them belong to this phase.** Anything here
+that turns out to be genuinely required is a stop-and-ask, not a judgement call.
+
+| Do not build | Why it looks tempting | Where it actually lives |
+|---|---|---|
+| Anything in `share/` or `public/` — the dialog, `resolveForToken`, "Shared with me", `/s/:token` | The content URL endpoint is deliberately not role-guarded "for viewers" | Phase 4 |
+| A trash or restore UI, or a restore call site for `applyAggregateDelta` | Soft delete keeps every row, so restoring looks like a missing feature | Nowhere. Decision #6 ships no trash, and #5 names four call sites, not five |
+| The storage sweeper, as code | This phase creates both categories of orphan and names them | Phase 6, as README prose only |
+| `pnpm db:recompute` | The aggregates this phase writes are what it repairs | Phase 6, stretch |
+| `react-pdf`, or any PDF library | `<iframe>` will look primitive next to it | Nowhere. Decision #15 puts it on the stretch list |
+| A folder-move **UI** | The move endpoint and the cycle guard are type-agnostic and will work | Nowhere. `BRIEF.md` requires moving a *file*; the guard is covered by a test, not a screen |
+| Search, filtering, or versioning on conflict | Both are named in the brief | Nowhere — extra credit, decision #1 |
+| A `dataRoomId` column on `Blob`, or any other schema change | The blob's tenancy is carried by a string prefix, which feels weaker | Stop and ask. Decision #28 chose the prefix on purpose |
+| Raw SQL outside `node.repository.ts` | `blob.repository.ts` needs a prefix match | Nowhere. Prisma's `startsWith` compiles to `LIKE`; the ESLint rule stands |
+| Any new runtime dependency beyond `@nestjs/throttler` | DnD and the upload queue both feel library-shaped | Stop and ask. Native DnD and a plain store were chosen deliberately |
+
+Two positive gates, so the phase can be called finished rather than argued about:
+
+- **Every UI task ships its loading, empty and error states in the same commit as the
+  screen.** The upload queue has more of them than anything built so far — pending,
+  uploading, error, cancelled, complete — and the file `410` screen is one of them.
+- **The phase is done when `pnpm typecheck && lint && test` pass, `CHANGELOG.md` carries
+  the entry, and the four file flows have been walked in a browser.** Report a failing gate
+  by name; do not tick a box around it.
 
 ---
 
@@ -380,6 +471,20 @@ Deploy already happened in Phase 1; this is what is left.
 - [ ] `README.md`: setup, design decisions, ERD, the "How it scales" answers, the AI-usage
       note, hosted URLs, demo links, and the known limitations (orphan-blob sweeper and
       recompute described but not shipped)
+- [ ] Describe the **storage sweeper** in the README — considered in Phase 3 grooming and
+      deliberately not built. Two categories of unreferenced bytes accumulate, from one
+      cause each, and a single scheduled job (daily or weekly; Cloud Run Jobs + Cloud
+      Scheduler) collects both:
+      - `PENDING` blobs whose upload never reached `complete` — a cancelled or abandoned
+        transfer. Older than an hour is safe to sweep.
+      - `READY` blobs whose only nodes are soft-deleted. Deleting a file never touches
+        storage: `nodes_type_blob_check` requires `FILE → blob_id NOT NULL`, so the row
+        cannot be detached, and removing the bytes would make a reversible operation
+        irreversible in fact while still looking reversible (decision #6).
+      **The visible consequence to state plainly:** the quota is computed from node
+      aggregates, not from the bucket, so a room can report 0 bytes used while holding
+      real objects in GCS. Nothing breaks — the authoritative quota check reads the same
+      aggregates — but the two numbers are not the same number.
 - [ ] Final pass over loading / empty / error states — a sweep, not the first pass
 - [ ] `pnpm db:recompute` **if time remains** (stretch)
 
