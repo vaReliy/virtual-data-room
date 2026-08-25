@@ -1,0 +1,590 @@
+<!-- Decision log. Append-only: supersede entries, do not rewrite history. -->
+
+# Decision Log
+
+Compact ADR log for the Virtual Data Room take-home. Each entry: context, decision,
+consequences. Decisions 1-12 were agreed in the design session; 13-21 are the smaller
+calls settled afterwards, during review. Nothing is left undecided.
+
+Status legend: **Accepted** | **Superseded by #N** | **Proposed**
+
+---
+
+## 1. Scope: the required feature set, built well, and nothing beyond it
+
+**Status:** Accepted
+
+**Context.** The functional scope — folder CRUD, file CRUD, multi-file upload with
+per-file progress, move, two sharing modes, revoke, and a deployed system — is
+substantial, and the requirements name specific edge cases that are easy to skip.
+
+**Decision.** Every listed requirement ships, with its edge cases and error states.
+Nothing outside the requirements is built, and all design decisions are made before
+implementation starts (this document exists for that reason).
+
+**Consequences.** No NX, no full clean architecture, no extra-credit features
+(cross-room search, file versioning). Tests cover the critical path only: access control
+and the tree operations whose correctness lives in raw SQL and transaction state.
+A half-built feature is worse than an absent one, so anything that cannot ship complete
+does not ship.
+
+---
+
+## 2. Backend architecture: Nest modules + repository layer
+
+**Status:** Accepted
+
+**Context.** Options were flat Nest-idiomatic (service calls Prisma directly),
+modular + repository, or full onion/clean with domain entities and mappers.
+
+**Decision.** Nest modules where Prisma is hidden behind repositories, plus a
+dedicated `AccessControlService`. **No** separate domain entities and **no** mappers —
+types are Prisma-generated.
+
+**Rationale.** The two genuinely hard parts of this domain are tree traversal and
+authorization resolution. Both are intentionally Postgres-specific (recursive
+queries, index range scans), so an abstraction whose purpose is database portability
+pays nothing. Isolation is applied exactly where it is testable and valuable.
+
+**Consequences.** ~1 extra file per module. Permission logic is unit-testable with a
+mocked repository. Transactions are passed explicitly as a `tx` parameter.
+
+---
+
+## 3. Node modeling: single `nodes` table (single-table inheritance)
+
+**Status:** Accepted
+
+**Context.** Folders and files could be two tables or one table with a `type`
+discriminator.
+
+**Decision.** One `nodes` table with `type: FOLDER | FILE`. `DataRoom` stays a
+separate table (it owns the owner relation and is the scoping boundary).
+Root-level nodes have `parentId = NULL`.
+
+**Rationale.**
+- Listing a folder is one indexed query with trivial keyset pagination. Two tables
+  would require `UNION ALL` of differing shapes, which makes "next 50 after this name"
+  painful — and the brief explicitly asks about 100k files.
+- `UNIQUE (parent_id, name)` lets the database enforce name conflicts, including
+  cross-type ones, instead of application-level checks with race conditions.
+- Sharing targets a real foreign key rather than a polymorphic `(type, id)` pair
+  with no referential integrity.
+- Move / rename / delete-subtree are written once instead of twice.
+
+**Consequences.** File-only columns (`blobId`) are nullable; a `CHECK` constraint
+enforces `type = 'FILE' ⟺ blob_id IS NOT NULL`.
+
+**Prior art.** Google Drive models folders as files with a folder mime type, for the
+same reasons.
+
+---
+
+## 4. Tree representation: `parent_id` + materialized path
+
+**Status:** Accepted
+
+**Context.** Adjacency list with recursive CTEs, adjacency + materialized path, or a
+closure table.
+
+**Decision.** `parent_id` is the source of truth (with FK integrity); `path` is a
+denormalized index of the form `/<ancestor-uuid>/<ancestor-uuid>/<self-uuid>/`.
+
+**Rationale.** The hottest path in the system is "does a share exist on this node or
+any of its ancestors?", evaluated on essentially every API request. With a
+materialized path, ancestors are obtained by splitting a string — **zero** tree
+queries — and the share lookup is a single indexed `IN`. Subtree aggregation becomes
+an index range scan instead of recursion. Cycle detection on move is a string prefix
+comparison.
+
+A closure table was rejected: it is a third structure to maintain (it does not remove
+`parent_id`), move requires two non-trivial delete/insert statements over
+`subtree × depth` rows, and we have no depth-filtered queries to justify it.
+
+**Consequences.**
+- `path` is built from **UUIDs, not names** — so rename never touches descendants,
+  and LIKE metacharacters can never appear in it.
+- `path` is internal: never accepted from a request, never returned to the client.
+- Moving a folder rewrites descendant paths in one `UPDATE ... substr(...)`.
+- `path` and `parent_id` can drift → mitigated by a recompute script (see #5).
+
+---
+
+## 5. Subtree aggregates: incremental counters
+
+**Status:** Accepted
+
+**Context.** The README must answer "how do you compute the total size and item count
+of a folder including its whole subtree?".
+
+**Decision.** Maintain `total_size`, `file_count`, `folder_count` on folder rows (and
+on `DataRoom`), updated inside the same transaction as the mutation, via a single
+`updateMany` over the ancestor ids taken from `path`.
+
+**Rationale.** Computing on the fly is fine for one opened folder, but a listing of 50
+folders becomes 50 subtree scans — an N+1 that shows up precisely at the 100k scale the
+brief asks about.
+
+**Consequences.**
+- Write amplification is one `UPDATE` over ~depth rows (typically < 10).
+- A new invariant to maintain at four call sites: create, delete, move, restore.
+- **Mitigation:** a `recompute` script that rebuilds both `path` and all aggregates
+  from `parent_id` + blob sizes. This converts a scary invariant into a repair button,
+  and is worth describing in the README.
+- Bonus: per-user storage quota checks become a single integer comparison.
+
+---
+
+## 6. Deletion: soft delete, no trash UI
+
+**Status:** Accepted
+
+**Context.** The brief requires warning the user what will be deleted, and mentions the
+edge case of deleting a folder someone else is currently viewing.
+
+**Decision.** `deleted_at` timestamp. Subtree delete is one `UPDATE ... WHERE path LIKE`.
+No Trash/Restore screen — from the user's point of view deletion is permanent.
+
+**Rationale.** The brief says not to ship unimplemented features, so a half-built trash
+screen would be worse than none. Soft delete still buys recoverability during
+development and demo, and a cheaper subtree delete.
+
+**Consequences.**
+- Every read must filter `deleted_at IS NULL`. Forgetting it once leaks a deleted
+  document to a counterparty — the worst failure this system can have.
+  **Mitigation:** a Prisma Client Extension applies the filter globally, so it cannot
+  be forgotten.
+- Unique constraints must be **partial** (`WHERE deleted_at IS NULL`), which Prisma
+  cannot express declaratively — written as raw SQL in the migration.
+- Blobs are marked for cleanup rather than deleted inline.
+
+---
+
+## 7. Sharing: a grant on a node, resolved by ancestry
+
+**Status:** Accepted
+
+**Context.** Sharing a folder must grant read access to everything nested inside it,
+for both a public link and a per-user grant, with revocation.
+
+**Decision.** One `Share` row per grant, attached to a node (or to the whole Data Room
+when `nodeId IS NULL`). Permissions on descendants are **derived**, never materialized.
+
+```
+Share { dataRoomId, nodeId?, mode: LINK | USER, role: VIEWER,
+        tokenHash?, granteeEmail?, expiresAt?, revokedAt? }
+```
+
+**Rationale.** Materializing permissions onto every descendant means 20k writes to
+share a folder, 20k more to revoke, recomputation on move, and inheritance logic on
+every upload — permissions become a cache that must be invalidated. Deriving them
+makes revoke a single-row operation that applies instantly to the whole subtree, and
+new uploads inherit access with no code at all.
+
+**Consequences.**
+- Requires cheap ancestor lookup → this is *why* decision #4 exists.
+- `ShareRecipient` as a separate table is unnecessary: one row per principal.
+- Sharing with someone who has no account yet works, because the grant stores
+  `granteeEmail`, not a user foreign key.
+- **Per-user roles without remodeling** (a README question) is answered by adding
+  `EDITOR` to the `ShareRole` enum and checking `role` in write guards. No schema change.
+
+**Security requirements.**
+- `granteeEmail` is matched only against a **verified** session email, otherwise
+  registering an account on someone else's address would steal their access.
+- Link tokens are generated with `randomBytes(32).toString('base64url')` (not UUIDv4 —
+  insufficient entropy) and stored **hashed**, so a database dump does not yield
+  working links.
+
+---
+
+## 8. Authentication: Google SSO only
+
+**Status:** Accepted
+
+**Context.** The brief allows social auth or email/password. Email/password would add
+registration, forgotten-password, reset and verification flows, plus an SMTP vendor.
+
+**Decision.** Google OAuth only, via `@nestjs/passport` + `passport-google-oauth20`.
+`User` and `Account` are separate tables (one person, many login methods) so adding a
+second provider later does not create duplicate users.
+
+**Consequences.**
+- `email_verified` comes from Google, so the email-based grant matching in #7 is sound
+  with no extra work.
+- **Known limitation:** a reviewer needs two Google accounts to exercise permissioned
+  sharing. Public links are testable anonymously in a private window.
+- **Must not forget:** set the OAuth consent screen to *In production*. In *Testing*
+  mode only explicitly listed test users can sign in, and a reviewer would just see
+  `Error 403: access_denied`.
+- **Demo strategy:** auto-provision a populated sample Data Room on first login, and
+  publish public share links (populated / empty / revoked) in the README so the
+  reviewer sees a real product instead of an empty state.
+
+---
+
+## 9. Access enforcement: `AccessScope` + scope-bounded repository
+
+**Status:** Accepted
+
+**Context.** Anonymous link access and authenticated access must not diverge into two
+authorization paths, but public and private responses need different shapes. The main
+risk is accidentally serving a node above the shared root (including via breadcrumbs).
+
+**Decision.** Separate controllers with separate DTOs, a single `AccessControlService`,
+and repositories that take an `AccessScope` as their first argument.
+
+```ts
+declare const brand: unique symbol;
+type AccessScope = {
+  readonly [brand]: 'AccessScope';
+  dataRoomId: string;
+  rootNodeId: string | null;   // null => whole data room
+  rootPath: string;            // '/' for owner, '/f1/f2/' for a shared subtree
+  role: 'OWNER' | 'VIEWER';
+};
+```
+
+Every query is bounded in SQL by `path startsWith scope.rootPath`.
+
+**Rationale.** Authorization expressed as a *boundary* rather than a *boolean* makes
+over-reach structurally impossible: a node above the share root simply does not exist
+for that query and returns 404. Breadcrumbs are derived by
+`node.path.slice(scope.rootPath.length)`, so clipping is arithmetic rather than
+vigilance — which matters because folder names themselves leak information in an M&A
+context.
+
+**Enforcement mechanisms** (chosen over a runtime "ORM for the ORM", which would mean
+reimplementing Prisma's API and losing its type inference):
+1. `AccessScope` is a branded type — only `AccessControlService` can produce one.
+   A service cannot fabricate one with an object literal; TypeScript rejects it.
+2. `PrismaService` is not exported from the persistence module — the DI container
+   fails at startup if a service tries to inject it.
+3. ESLint `no-restricted-imports` forbids `@prisma/client` outside `*.repository.ts`.
+
+**Consequences.** No auth interceptors or middleware; one ordinary `JwtAuthGuard` on
+the private controller only. API responses for a recipient report `parentId: null` at
+the share root, so the client stops climbing instead of hitting a 403.
+
+---
+
+## 10. Deploy topology: Vercel proxy → Cloud Run
+
+**Status:** Accepted
+
+**Context.** No custom domain is available. Frontend on `*.vercel.app` and backend on
+`*.run.app` are different sites (both are on the Public Suffix List), so a shared
+cookie is impossible; `SameSite=None` third-party cookies are blocked by Safari.
+
+**Decision.**
+
+```
+browser → app.vercel.app
+             │  /api/*   (vercel.json rewrite)
+             ▼
+          dataroom-api-*.run.app   (Docker)
+             ├── Neon      (new database inside the existing project)
+             └── GCS       (presigned PUT/GET, direct from the browser)
+```
+
+**Rationale.** Proxying through Vercel makes the browser see a single origin. The
+session cookie becomes first-party (`HttpOnly; Secure; SameSite=Lax`) and works in
+every browser; CORS disappears entirely; and local development mirrors production
+exactly via Vite's `server.proxy`. Cloud Run was chosen over Render because a free
+Render service sleeps and cold-starts in ~50s — the first thing a reviewer would
+experience of the product.
+
+**Consequences.**
+- +50-100ms latency on API calls; uploads and PDF downloads bypass the proxy entirely
+  (presigned URLs straight to GCS), so only JSON flows through it.
+- OAuth redirect URI must be `https://<app>.vercel.app/api/auth/google/callback`.
+- The Cloud Run URL stays publicly reachable, satisfying "backend deployed and
+  publicly accessible"; both URLs go in the README.
+- A custom domain remains an optional cosmetic upgrade, no longer an architectural need.
+
+---
+
+## 11. Frontend: Vite SPA
+
+**Status:** Accepted
+
+**Context.** Any React framework is allowed; Vercel is recommended for hosting.
+
+**Decision.** Vite + React + TypeScript, React Router, TanStack Query, Tailwind +
+shadcn/ui, react-hook-form. Zustand only if the upload queue needs global state.
+
+**Rationale.** We already have a full backend. Next.js would add a second server and a
+permanent question of "does this belong in Next or in Nest?" — two places that read the
+session, two validation sites, two deploy artifacts. Its real benefits here (SSR, SEO)
+do not apply behind a login.
+
+**Consequences.**
+- Uploads use `XMLHttpRequest`, not `fetch` — `fetch` still has no upload progress event.
+  This is a platform limitation worth knowing before writing the progress bar.
+- TanStack Query directly addresses the "folder deleted while someone is viewing it"
+  edge case: cache invalidation plus `refetchOnWindowFocus` surfaces the change, and a
+  `410 Gone` becomes a proper error state.
+
+---
+
+## 12. Tooling: pnpm workspaces, no Turbo; Zod contracts
+
+**Status:** Accepted
+
+**Decision.**
+- **pnpm workspaces**, three packages: `apps/api`, `apps/web`, `packages/contracts`.
+  No NX (its dependency graph, affected-commands and generators pay off from ~10-20
+  packages, and it complicates the Dockerfile). No Turborepo either — build ordering
+  here is one line of npm scripts, and adding it would repeat the mistake NX was
+  rejected for.
+- **Supply chain:** `save-exact=true` and `minimum-release-age=10080` (7 days) in
+  `.npmrc`, `--frozen-lockfile` in Docker and CI. Most compromised npm releases are
+  detected and pulled within hours, so a week's delay removes nearly the whole class.
+- **Zod in `packages/contracts`** as the single source of truth for request/response
+  shapes: one schema serves the Nest validation pipe, the service types, the
+  react-hook-form resolver, and the TanStack Query types. A contract change becomes a
+  compile error rather than a runtime surprise on demo day.
+
+**Rejected: LIVR.** Its strength is language-independent rules shared across services in
+different languages. We have one language on both ends, and it gives no TypeScript
+inference — types would be hand-maintained alongside the rules, which is exactly the
+drift `packages/contracts` exists to prevent.
+
+**Consequences.** `pnpm deploy --filter=@dr/api --prod out` keeps the API Docker image
+free of the rest of the workspace. Zod normalization (`.trim()`, `.toLowerCase()`) is
+applied at the edge so name uniqueness and email matching behave predictably.
+
+---
+
+## 13. API shape: one call, bare object, opaque cursor
+
+**Status:** Accepted
+
+**Decision.** `GET /api/rooms/:roomId/nodes/:nodeId?cursor=` returns
+`{ node, breadcrumbs, children, nextCursor }`. Omitting `nodeId` means the room root.
+
+**Rationale.** The browser view always renders all three pieces, so three endpoints would
+produce waterfall loading on every navigation, which is visible on every click. The cost,
+coarser cache keys, is paid once in a single TanStack Query key.
+
+No `{ data, meta }` envelope: it earns its place when responses are heterogeneous or
+metadata is cross-cutting, and here it would be ceremony around one shape that Zod already
+types on both ends. Errors are the exception and do carry a shape — Nest's default
+`{ statusCode, message, error }` — so the client can switch on status per the error
+contract.
+
+**Consequences.** The cursor is **opaque**, base64 of `(type, lower(name))`. Opaque
+because a keyset position is not public API: encoding it stops clients from constructing
+one and lets the sort key change without breaking the contract.
+
+---
+
+## 14. Session: a short JWT in the cookie, no refresh token
+
+**Status:** Accepted
+
+**Context.** A stateless JWT cannot be revoked, which looks uncomfortable in a product
+about revocation.
+
+**Decision.** A 2-hour JWT in the httpOnly cookie, re-issued silently on any authenticated
+request past half its life. Logout clears the cookie.
+
+**Rationale.** The discomfort dissolves on inspection: the revocation the brief requires is
+revocation of **shares**, which is a database row consulted on every access resolution and
+therefore instant. Session revocation is a different feature that nothing in `BRIEF.md`
+asks for. A database-backed session would add a write per request and a migration to buy a
+property nothing asks for. With silent re-issue, a refresh token would only matter for
+sessions longer than the demo will ever run.
+
+---
+
+## 15. PDF viewing: `<iframe>` first
+
+**Status:** Accepted
+
+**Decision.** `<iframe>` pointed at a short-lived presigned GET URL. `react-pdf` is on the
+stretch list.
+
+**Consequences.** Two constraints travel with this choice:
+
+- The presigned URL is fetched with `staleTime: 0` / `gcTime: 0` and never served from
+  cache — a 300-second URL outlives its validity inside a normal query cache, and the
+  failure renders as a storage-provider XML error inside the app.
+- The presigned GET sets `response-content-type=application/pdf` and
+  `response-content-disposition: inline`. Without `inline` the browser downloads the file
+  instead of rendering it in the frame.
+
+---
+
+## 16. Test scope: Vitest, two layers, written where the code is
+
+**Status:** Accepted
+
+**Decision.** Vitest in both apps — one runner, one config idiom.
+
+- **Unit, mocked repository:** `AccessControlService` — scope boundaries, breadcrumb
+  clipping, revoked and expired links, ancestor inheritance, the `USER`-token mode branch.
+- **Integration smoke set, against the compose Postgres:** four tests — subtree delete over
+  an already-deleted row, `23505` retry on upload, `23505` → `409` on rename, move cycle
+  guard.
+
+**Rationale.** The smoke set is not optional and the unit tests cannot replace it: a mocked
+repository never executes raw SQL, never enters an aborted transaction, never takes an
+advisory lock. Those four behaviours are exactly where the design is load-bearing, so
+"test only the critical path" means these, not fewer.
+
+**Consequences.** Both sets are written at the end of Phase 4, where
+`AccessControlService` reaches its final shape — not retrofitted at the end of the
+project, where they become the implicit cut. The *broad* integration suite stays stretch.
+
+---
+
+## 17. Lint and format: flat config, type-checked, no hooks
+
+**Status:** Accepted
+
+**Decision.** `typescript-eslint` recommended-type-checked plus the project's boundary
+rules — `no-restricted-imports` banning `@prisma/client` outside `*.repository.ts`, and
+raw SQL confined to `node.repository.ts`. Prettier for formatting.
+
+**Rationale.** The boundary rule is not style: it is the enforcement mechanism decision #9
+depends on, so it is the one rule that must exist. No Husky, lint-staged or commitlint — a
+pre-commit hook that fails mid-demo costs more than it saves at this scale, and CI runs the
+same checks anyway.
+
+**Rejected: Google's config.** A style guide for a different era of the language; it would
+fight the type-checked ruleset.
+
+---
+
+## 18. CI: one workflow, checks only
+
+**Status:** Superseded in part by #22 — the checks workflow stands, the "no deploy"
+half does not. Its stated cost (service-account keys in GitHub secrets) turned out to
+be avoidable.
+
+**Decision.** One GitHub Actions workflow on PRs and pushes to `main`: typecheck, lint,
+test. No build, no deploy.
+
+**Rationale.** Vercel deploys itself on push, and Cloud Run is deployed manually in the
+first pass. A deploy workflow means service-account keys in GitHub secrets and a debug loop
+inside CI — infrastructure budget spent instead of product budget.
+
+---
+
+## 19. Move UX: a "Move to…" dialog, plus drag-and-drop
+
+**Status:** Accepted
+
+**Decision.** A dialog with a folder picker is the primary affordance; drag-and-drop
+between folders ships alongside it.
+
+**Rationale.** The dialog is predictable, accessible and testable, and it satisfies the
+brief on its own. Drag-and-drop was originally stretch and was pulled into the plan by
+owner decision — it is what makes the browser feel like a file manager rather than a form.
+
+**Consequences.** Name conflict on move is `409` with a rename/cancel dialog, not a silent
+auto-suffix. See decision #20 for why the conflict paths split the way they do.
+
+---
+
+## 20. Name conflicts: suffix only where the user did not choose the name
+
+**Status:** Accepted
+
+**Context.** The database enforces uniqueness per folder, case-insensitively, ignoring
+soft-deleted rows. Four call sites can hit it.
+
+**Decision.**
+
+> Auto-suffix where the name is **not chosen by the user in that moment**. Raise `409`
+> with a dialog where it is.
+
+- **Upload** → `contract.pdf` becomes `contract (1).pdf`, silently. The name came from the
+  file, and dragging twenty files must not open twenty dialogs.
+- **Create folder, rename, move** → `409`, no suffix. The user typed the name, or chose a
+  destination knowing its contents.
+
+**Consequences.** The suffix path is an **optimistic insert**: attempt it, catch `23505` /
+`P2002`, recompute the suffix, retry, bound at 3 attempts then `409`. Read-then-insert is a
+check-then-act race that fails under a multi-file drop. The retry re-runs the **whole**
+interactive transaction, because `23505` aborts it and Prisma exposes no savepoints —
+retrying just the `INSERT` fails with "current transaction is aborted", which is worse than
+the race it was meant to fix.
+
+---
+
+## 21. Data Rooms: multi-room model, minimal UI
+
+**Status:** Accepted
+
+**Decision.** The schema stays multi-room. The UI ships a create-room affordance in the
+zero-room empty state and a switcher only when a user actually has more than one room. No
+room list route, no room rename.
+
+**Rationale.** The affordance is required: without it, cutting both the multi-room UI and
+the auto-provisioned sample room would strand a fresh account with no room and no way to
+create one, making every owner-side flow ungradable. Everything beyond that affordance is
+unrequired surface — `BRIEF.md` never asks to manage rooms, and sharing a whole Data Room is
+served by the share dialog offering "this Data Room" as a scope.
+
+---
+
+## 22. Deploy mechanism: GitHub Actions with Workload Identity Federation
+
+**Status:** Accepted. Supersedes the "no deploy" half of #18; the topology of #10 is
+unchanged.
+
+**Context.** Decision #10 fixes the deploy *topology* (Vercel rewrite → Cloud Run) but
+never says how a build reaches Cloud Run. Two constraints settle it. First, `BRIEF.md`
+requires a GitHub repository as a deliverable, so a remote exists whether or not CI uses
+it. Second, the assistant must not hold cloud credentials: an authenticated `gcloud` on
+the development machine is reachable by any process running there, and the blast radius
+of a mistake is the whole project.
+
+Deploying by hand from a local `gcloud` fails the second constraint. Deploying by hand
+from Cloud Shell satisfies it but puts a human inside every iteration of a loop that
+typically runs five to ten times — wrong port, missing env var, failed startup probe,
+database unreachable from the chosen region.
+
+**Decision.**
+
+> Cloud Run is deployed by a GitHub Actions workflow that authenticates through Workload
+> Identity Federation. No service-account key exists anywhere.
+
+- The workflow exchanges GitHub's short-lived OIDC token for temporary Google Cloud
+  credentials. Nothing long-lived is stored in GitHub secrets, and nothing at all is
+  stored on the development machine.
+- The identity-pool provider carries an attribute condition on the **numeric**
+  `repository_id` and `repository_owner_id`, plus `ref == 'refs/heads/main'`. Numeric ids
+  are used because a repository *name* is released when the repository is deleted and can
+  be claimed by someone else; the repository is public, so this matters.
+- `deploy.yml` triggers on `workflow_dispatch` only. There is no deploy on push: a
+  push-triggered deploy on a public repository widens the set of events that can reach
+  the pool for no gain here.
+- Application secrets (`DATABASE_URL`, the Google OAuth client secret, the session
+  secret) live in Secret Manager and are referenced by the Cloud Run service, never
+  passed through the workflow file.
+- Database migrations run from the container entrypoint — `prisma migrate deploy` with
+  bounded retries and exponential backoff, then `exec` into the server. A deploy is
+  therefore the only migration mechanism; there is no separate manual step against Neon.
+
+**Rationale.** This is the only arrangement that keeps both properties at once. The
+assistant gets an autonomous debug loop — it edits the Dockerfile and workflow, triggers
+`gh workflow run`, and reads `gh run view --log` — while every credential that could
+damage the project stays inside GCP and GitHub. The one-time GCP bootstrap (enable APIs,
+create secrets, service account, pool, provider, IAM bindings) is scripted and run by the
+owner in Cloud Shell, where gcloud is already installed and already authenticated.
+
+**Consequences.**
+- One-time setup is heavier than creating a key: pool, provider, attribute mapping,
+  attribute condition, and a `roles/iam.workloadIdentityUser` binding. It is a script,
+  run once, and its cost does not recur.
+- The assistant cannot deploy new *code* on its own, because it does not push (see
+  `CLAUDE.md`). It can re-run a deploy of an already-pushed ref, which covers every
+  failure whose cause is configuration rather than code. To keep the owner out of the
+  loop as much as possible, the image is validated locally with `docker build` and
+  `docker run` against the compose database before the first push.
+- The workflow needs `permissions: id-token: write`, and that permission is granted in
+  the deploy job only.
+- The `ci.yml` checks workflow from #18 is unaffected and still runs on PRs and pushes.

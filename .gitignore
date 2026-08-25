@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*-key.json
+
+# Local data
+docker-data/
+*.sqlite
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Test output
+coverage/
+
+# Scratch
+tmp/
+
+# Private working notes (see notes/README.md)
+notes/
+
+# Personal Claude Code settings (permission overrides), not shared with the team
+.claude/settings.local.json

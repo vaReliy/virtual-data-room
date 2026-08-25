@@ -1,0 +1,138 @@
+# CLAUDE.md
+
+Virtual Data Room — take-home project. A secure repository for storing and sharing
+documents during due diligence.
+
+**Status: design closed, Phase 0 done, no code yet.** Accounts and credentials exist
+(`.env` is populated); the next step is Phase 1 of `docs/roadmap.md` — a **deployed**
+skeleton, not a local one.
+
+## Read before working
+
+Load only what the task needs — these are not all required at once.
+
+| File | When to read it |
+|---|---|
+| `CONTEXT.md` | Always. Domain vocabulary used in code, tests and UI. |
+| `BRIEF.md` | The brief. **Read-only — never edit.** |
+| `docs/decisions.md` | Before changing anything architectural. 21 accepted decisions with rationale. Nothing is left undecided. |
+| `docs/data-model.md` | Schema work, migrations, queries, indexes, invariants. |
+| `docs/architecture.md` | Layers, access control, upload flow, error contract, folder layout. |
+| `docs/roadmap.md` | Always, before picking up work. Task-level plan, per-phase scope, descope order. |
+
+## Rules
+
+- **All code, comments, documentation and commit messages in English.** Chat with the
+  user is in Ukrainian with English technical terms.
+- **Never run writable git commands** (`commit`, `push`, `rebase`, `reset --hard`).
+  Stage nothing; the user commits.
+- `BRIEF.md` is read-only.
+- **Never install or authenticate a cloud CLI locally** (`gcloud`, `vercel`). Cloud
+  changes are made by the user in the web console or Cloud Shell, or by the deploy
+  workflow. Write the commands; do not hold the credentials (decision #22).
+- Secrets only in `.env`, never committed. `.env.example` documents every variable.
+- Dependencies are pinned exactly (`save-exact=true`) and no release younger than
+  7 days is installed (`minimum-release-age=10080`).
+
+## Stack
+
+- **Monorepo:** pnpm workspaces — `apps/api`, `apps/web`, `packages/contracts`.
+  No NX, no Turborepo (decision #12).
+- **Backend:** NestJS, Prisma, PostgreSQL (Neon). Modules + repository layer, no domain
+  entities or mappers (decision #2).
+- **Frontend:** Vite + React + TypeScript, React Router, TanStack Query, Tailwind,
+  shadcn/ui (decision #11).
+- **Contracts:** Zod schemas shared by both apps — one schema is validation, type and
+  form resolver (decision #12).
+- **Storage:** GCS via its S3-compatible API (`@aws-sdk/client-s3`); MinIO locally.
+  Presigned PUT/GET straight from the browser.
+- **Auth:** Google OAuth only, Passport, httpOnly session cookie (decision #8).
+- **Deploy:** Vercel (static SPA) rewriting `/api/*` to Cloud Run (Docker), so the
+  browser sees a single origin (decision #10). Cloud Run is deployed by a
+  `workflow_dispatch` GitHub Actions workflow authenticating through Workload Identity
+  Federation (decision #22). Migrations run from the container entrypoint.
+
+## Architectural constraints to respect
+
+These are load-bearing. Violating them silently breaks security or scale properties.
+
+- `PrismaService` is **not** exported from the persistence module. Services never import
+  `@prisma/client`; only `*.repository.ts` files do (ESLint-enforced).
+- Repository methods take `AccessScope` as their first argument and bound every query by
+  `path startsWith scope.rootPath`. `AccessScope` is a branded type produced solely by
+  `AccessControlService`.
+- `path` is built from UUIDs, never names. It is internal: never accepted from a
+  request, never returned to a client.
+- `parent_id` is the source of truth; `path` and the folder aggregates are
+  denormalized caches, rebuildable with `pnpm db:recompute`.
+- Breadcrumbs are clipped to `scope.rootPath`. A node above the caller's scope must be
+  indistinguishable from one that does not exist — 404, never 403.
+- Raw SQL lives only in `node.repository.ts`, and it **bypasses** the Prisma soft-delete
+  extension: raw queries must filter `deleted_at IS NULL` explicitly.
+
+## Definition of done
+
+A `roadmap.md` checkbox is not done until all of these hold. Do not tick it otherwise, and
+do not report a phase complete with a failing gate — say which gate fails.
+
+- `pnpm typecheck && pnpm lint && pnpm test` pass. Not "should pass" — run them.
+- Any UI work ships with its **loading, empty and error states**. They are part of the
+  feature, not a later pass.
+- Anything touching the schema was written from `docs/data-model.md`, not from memory.
+- Error responses use the status codes in `architecture.md` § Error contract. `404` and
+  `410` are different states with different screens; neither is a generic failure.
+- New files land in the layout already described in `architecture.md`. A new top-level
+  directory is a design change, not an implementation detail.
+
+## Working rules
+
+Four rules learned the expensive way, during design. Each one closes a mistake that was
+actually made and cost real budget.
+
+- **A decision does not exist until it has a task.** Anything written into
+  `decisions.md` must have a corresponding checkbox in `roadmap.md`. A decision recorded
+  in one document and unscheduled in the other is an unpriced commitment — it looks
+  planned and is not.
+- **During implementation phases, do not edit `docs/`.** The exception is where a task
+  explicitly says to (Phase 2 writes the scope-exception inventory into
+  `architecture.md`). Documentation drift is how a phase spends its budget without
+  producing anything runnable.
+- **Verify, do not predict.** For anything outside this repository — cloud console UIs,
+  provider behaviour, library APIs — check it or ask. Never write instructions, or assert
+  how an external system behaves, from memory. A console UI that "has no page for this"
+  usually has one now.
+- **Say when the cost changes.** If a task is running past roughly twice its expected
+  size, stop and report instead of continuing. Report the overrun before starting the
+  work, not after being asked about it.
+
+## Stop and ask
+
+Do not resolve these yourself. They are decisions that were made deliberately, and a
+plausible-looking local fix silently breaks a property the design depends on.
+
+- A schema change that `data-model.md` does not describe — including "just one column".
+- A repository method that cannot take `AccessScope`, or a query that needs to escape the
+  scope boundary. The legitimate exceptions are enumerated in `architecture.md`; anything
+  outside that list is a security decision.
+- Raw SQL anywhere except `node.repository.ts`.
+- A new runtime dependency. Supply-chain rules apply (`save-exact`, 7-day minimum age),
+  and most additions are avoidable.
+- Contradicting an accepted decision in `decisions.md`. If it is wrong, say so and stop —
+  do not implement around it.
+- Reaching for anything on the **stretch list** while floor work remains unfinished.
+- Scope beyond the current phase. The phases are ordered so that each one is demoable;
+  work pulled forward tends to arrive half-built.
+
+## Agent skills
+
+### Issue tracker
+
+Local markdown under gitignored `notes/issues/<feature-slug>/`, not GitHub/GitLab (no remote configured). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), recorded as a `Status:` line per issue. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` at root + `docs/decisions.md` as a running decision log (not per-file ADRs). See `docs/agents/domain.md`.
