@@ -1,0 +1,112 @@
+name: virtual-data-room
+
+services:
+  postgres:
+    # Debian-based, deliberately not Alpine. Alpine ships musl collations, which sort
+    # differently from the glibc collations Neon uses, and every folder listing is
+    # ordered and keyset-paginated on lower(name). A collation mismatch would make local
+    # behaviour diverge from production exactly at page boundaries.
+    image: postgres:17
+    environment:
+      POSTGRES_USER: dataroom
+      POSTGRES_PASSWORD: dataroom
+      POSTGRES_DB: dataroom
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U dataroom -d dataroom']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Same S3 SDK as production, different endpoint — GCS is reached through its
+  # S3-compatible XML API, so there is one StorageService implementation, not two.
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Creates the bucket on first boot so a fresh clone needs no manual MinIO step.
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/dataroom-local &&
+      mc anonymous set none local/dataroom-local
+      "
+
+  api:
+    # A stock Node image running the workspace in watch mode. The production image is a
+    # multi-stage Dockerfile built in the Ship section; this is not it, and the two are
+    # deliberately not shared.
+    image: node:22-bookworm-slim
+    working_dir: /workspace
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @dr/api dev"
+    environment:
+      NODE_ENV: development
+      PORT: '3000'
+      DATABASE_URL: postgresql://dataroom:dataroom@postgres:5432/dataroom
+      DIRECT_URL: postgresql://dataroom:dataroom@postgres:5432/dataroom
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_REGION: us-east-1
+      STORAGE_BUCKET: dataroom-local
+      STORAGE_ACCESS_KEY_ID: minioadmin
+      STORAGE_SECRET_ACCESS_KEY: minioadmin
+      # Secrets stay in .env, which is gitignored and never baked into this file.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL}
+      SESSION_SECRET: ${SESSION_SECRET}
+      APP_URL: ${APP_URL}
+    ports:
+      - '3000:3000'
+    volumes:
+      - .:/workspace
+      - api-node-modules:/workspace/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # apps/web does not exist until the Web session lands, so this service is opt-in
+  # (`docker compose --profile web up`) and `docker compose up` stays green until then.
+  # Removing the `profiles` key is that session's first task.
+  web:
+    profiles: ['web']
+    image: node:22-bookworm-slim
+    working_dir: /workspace
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @dr/web dev --host"
+    environment:
+      VITE_PORT: '5173'
+    ports:
+      - '5173:5173'
+    volumes:
+      - .:/workspace
+      - web-node-modules:/workspace/node_modules
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
+  minio-data:
+  api-node-modules:
+  web-node-modules:

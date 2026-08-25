@@ -83,6 +83,12 @@ do not report a phase complete with a failing gate — say which gate fails.
   `410` are different states with different screens; neither is a generic failure.
 - New files land in the layout already described in `architecture.md`. A new top-level
   directory is a design change, not an implementation detail.
+- **`CHANGELOG.md` has an entry.** Write it when a phase finishes, or when a task large
+  enough to carry its own issue finishes — not in a sweep at the end. Record what changed
+  *and* what the diff does not make obvious: a constraint that will bite whoever edits it
+  next, a version pinned for a reason, a statement that must be carried forward by hand.
+  `notes/` is gitignored, so `deviations.md` never reaches the repository — anything that
+  must outlive the session belongs here.
 
 ## Working rules
 

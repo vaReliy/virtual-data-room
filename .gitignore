@@ -40,3 +40,6 @@ notes/
 
 # Personal Claude Code settings (permission overrides), not shared with the team
 .claude/settings.local.json
+
+# Prisma client, generated from prisma/schema.prisma by `pnpm db:generate`
+apps/api/src/generated/

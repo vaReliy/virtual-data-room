@@ -1,0 +1,21 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# Supply chain (decision #12). pnpm 10+ reads these from here, not from `.npmrc` —
+# `pnpm config get save-exact` returns undefined when they are only set there.
+#   minimumReleaseAge: no release younger than 7 days (10080 minutes) is installed.
+#   saveExact:         dependencies are pinned exactly, never with a range.
+minimumReleaseAge: 10080
+saveExact: true
+
+# pnpm refuses to run a dependency's install scripts unless it is approved here, and
+# `pnpm install --frozen-lockfile` exits 1 while any are unapproved — so an unapproved
+# package fails CI and the Docker build, not just the local install.
+#
+# The key is `allowBuilds`, a map. The pnpm 10 spelling (`onlyBuiltDependencies`, a
+# list) is still parsed but approves nothing: it turns into keys with a placeholder
+# value. `pnpm approve-builds --all` writes the correct form.
+allowBuilds:
+  '@prisma/engines': true
+  prisma: true

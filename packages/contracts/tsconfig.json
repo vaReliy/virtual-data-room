@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // This package is compiled into the browser bundle as well as the API, so it is
+    // typed against the web platform rather than against Node. Nothing here may depend
+    // on a Node-only global such as `Buffer`.
+    "lib": ["ES2023", "DOM"],
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"]
+}

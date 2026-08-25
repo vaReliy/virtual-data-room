@@ -43,34 +43,35 @@ work here (the OAuth cookie, the UI states) must not land in the most cluttered 
 | **S2 Web** | Web | `typecheck && lint` green, and the login flow walked in a browser |
 | **S3 Ship** | Ship | Google login on the Vercel URL lands on an empty room served from Neon |
 
-Each session hands over through the code, the ticked boxes here, and one file in gitignored
-`notes/issues/phase-1/` holding **only deviations and open questions** — never a summary of
-what the code already shows.
+Each session starts from its brief in gitignored `notes/issues/phase-1/issues/` and hands
+over through the code, the ticked boxes here, and `deviations.md` in that same directory —
+which holds **only deviations and open questions**, never a summary of what the code
+already shows.
 
 ### Workspace
-- [ ] `pnpm init`, `pnpm-workspace.yaml` (`apps/*`, `packages/*`)
-- [ ] `.npmrc`: `save-exact=true`, `minimum-release-age=10080`
-- [ ] Root scripts: `dev`, `build`, `lint`, `typecheck`, `test`
-- [ ] ESLint flat config + Prettier, shared. Includes the two boundary rules:
+- [x] `pnpm init`, `pnpm-workspace.yaml` (`apps/*`, `packages/*`)
+- [x] `.npmrc`: `save-exact=true`, `minimum-release-age=10080`
+- [x] Root scripts: `dev`, `build`, `lint`, `typecheck`, `test`
+- [x] ESLint flat config + Prettier, shared. Includes the two boundary rules:
       `@prisma/client` only in `*.repository.ts`, raw SQL only in `node.repository.ts`
 
 ### Contracts
-- [ ] `packages/contracts`: Zod schemas consumed as TypeScript source by both apps
-- [ ] Size fields typed as `number` with the bound documented
-- [ ] Cursor codec: opaque base64 of `(type, lower(name))`
+- [x] `packages/contracts`: Zod schemas consumed as TypeScript source by both apps
+- [x] Size fields typed as `number` with the bound documented
+- [x] Cursor codec: opaque base64 of `(type, lower(name))`
 
 ### API
-- [ ] Nest scaffold; `PersistenceModule` with `PrismaService` **not** exported
-- [ ] Prisma schema per `data-model.md`; `datasource` declares both `url` and `directUrl`
-- [ ] First migration + the five raw SQL statements (partial unique index, composite
+- [x] Nest scaffold; `PersistenceModule` with `PrismaService` **not** exported
+- [x] Prisma schema per `data-model.md`; `datasource` declares both `url` and `directUrl`
+- [x] First migration + the five raw SQL statements (partial unique index, composite
       `text_pattern_ops` index, two CHECKs, listing expression index)
-- [ ] Prisma Client Extension applying the global `deletedAt: null` read filter
-- [ ] `GET /api/health`
+- [x] Prisma Client Extension applying the global `deletedAt: null` read filter
+- [x] `GET /api/health`
 
 ### Auth
-- [ ] Google OAuth end to end: login → `User` + `Account` upsert → httpOnly session cookie
-- [ ] `GET /api/me`
-- [ ] Auto-provision a Data Room on first login
+- [x] Google OAuth end to end: login → `User` + `Account` upsert → httpOnly session cookie
+- [x] `GET /api/me`
+- [x] Auto-provision a Data Room on first login
 
 ### Web
 - [ ] Vite + React + TS + Tailwind + shadcn init; `server.proxy` → `/api`
@@ -78,7 +79,7 @@ what the code already shows.
 
 ### Local
 
-- [ ] `docker-compose.yml`: `postgres:17` (Debian-based, not Alpine — collation parity
+- [x] `docker-compose.yml`: `postgres:17` (Debian-based, not Alpine — collation parity
       with Neon), `minio`, api (watch), web (vite). Belongs to S1 — the API needs a
       database before anything else in this phase can run
 

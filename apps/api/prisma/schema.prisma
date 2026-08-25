@@ -1,0 +1,166 @@
+// Schema for the Virtual Data Room. Written from `docs/data-model.md`; rationale for
+// each choice lives in `docs/decisions.md` (#3 single table, #4 materialized path,
+// #5 aggregates, #6 soft delete, #7 sharing).
+//
+// Prisma 7 has no `url` / `directUrl` on the datasource: the pooled runtime connection
+// is handed to the driver adapter in `prisma.service.ts`, and the direct connection that
+// migrations need is declared in `prisma.config.ts`. The split itself is unchanged —
+// PgBouncer in transaction mode cannot carry the session-level statements `prisma
+// migrate` issues.
+//
+// Column and table names are snake_case because the five raw SQL statements in the first
+// migration address them directly.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+  // Emit extensionless relative imports. The default keeps a literal `.ts` suffix,
+  // which survives compilation into dist/ and then resolves to nothing at runtime.
+  importFileExtension = ""
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Provider {
+  GOOGLE
+}
+
+enum NodeType {
+  FOLDER
+  FILE
+}
+
+enum BlobStatus {
+  PENDING
+  READY
+}
+
+enum ShareMode {
+  LINK
+  USER
+}
+
+enum ShareRole {
+  VIEWER // EDITOR added later, no schema change
+}
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  email         String   @unique // normalized lower-case
+  emailVerified Boolean  @default(false) @map("email_verified")
+  name          String?
+  avatarUrl     String?  @map("avatar_url")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  accounts     Account[]
+  dataRooms    DataRoom[]
+  shares       Share[]
+  createdNodes Node[]     @relation("NodeCreatedBy")
+
+  @@map("users")
+}
+
+model Account {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @map("user_id") @db.Uuid
+  provider          Provider
+  providerAccountId String   @map("provider_account_id") // Google `sub`
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model DataRoom {
+  id          String    @id @default(uuid()) @db.Uuid
+  ownerId     String    @map("owner_id") @db.Uuid
+  name        String
+  totalSize   BigInt    @default(0) @map("total_size")
+  fileCount   Int       @default(0) @map("file_count")
+  folderCount Int       @default(0) @map("folder_count")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  owner  User    @relation(fields: [ownerId], references: [id])
+  nodes  Node[]
+  shares Share[]
+
+  @@index([ownerId, deletedAt])
+  @@map("data_rooms")
+}
+
+model Node {
+  id          String    @id @default(uuid()) @db.Uuid
+  dataRoomId  String    @map("data_room_id") @db.Uuid
+  parentId    String?   @map("parent_id") @db.Uuid
+  type        NodeType
+  name        String
+  path        String // '/<uuid>/<uuid>/' ancestors + self
+  size        BigInt    @default(0) // FILE: blob size, FOLDER: 0
+  totalSize   BigInt    @default(0) @map("total_size") // FOLDER: subtree bytes
+  fileCount   Int       @default(0) @map("file_count") // FOLDER: subtree files
+  folderCount Int       @default(0) @map("folder_count") // FOLDER: subtree folders
+  blobId      String?   @map("blob_id") @db.Uuid
+  createdById String    @map("created_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  dataRoom  DataRoom @relation(fields: [dataRoomId], references: [id], onDelete: Cascade)
+  parent    Node?    @relation("NodeChildren", fields: [parentId], references: [id])
+  children  Node[]   @relation("NodeChildren")
+  blob      Blob?    @relation(fields: [blobId], references: [id])
+  createdBy User     @relation("NodeCreatedBy", fields: [createdById], references: [id])
+  shares    Share[]
+
+  // Folder listing + keyset pagination is an EXPRESSION index on lower(name), which
+  // Prisma cannot declare — see raw SQL statement 5. There is deliberately no `depth`
+  // column: ancestry comes from `path`.
+  @@index([dataRoomId, name]) // future: search by name
+  @@index([blobId])
+  @@map("nodes")
+}
+
+model Blob {
+  id         String     @id @default(uuid()) @db.Uuid
+  storageKey String     @unique @map("storage_key") // object key in GCS / MinIO
+  mimeType   String     @map("mime_type")
+  size       BigInt
+  checksum   String?
+  status     BlobStatus @default(PENDING)
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  nodes Node[]
+
+  @@map("blobs")
+}
+
+model Share {
+  id           String    @id @default(uuid()) @db.Uuid
+  dataRoomId   String    @map("data_room_id") @db.Uuid
+  nodeId       String?   @map("node_id") @db.Uuid // null => the whole Data Room
+  mode         ShareMode
+  role         ShareRole @default(VIEWER)
+  tokenHash    String?   @unique @map("token_hash") // LINK mode; SHA-256 of the token
+  granteeEmail String?   @map("grantee_email") // USER mode; normalized lower-case
+  createdById  String    @map("created_by_id") @db.Uuid
+  expiresAt    DateTime? @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  dataRoom  DataRoom @relation(fields: [dataRoomId], references: [id], onDelete: Cascade)
+  node      Node?    @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  createdBy User     @relation(fields: [createdById], references: [id])
+
+  @@index([granteeEmail, revokedAt]) // "shared with me"
+  @@index([nodeId, revokedAt]) // ancestor grant lookup
+  @@index([dataRoomId, revokedAt])
+  @@map("shares")
+}
