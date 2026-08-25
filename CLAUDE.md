@@ -3,9 +3,11 @@
 Virtual Data Room — take-home project. A secure repository for storing and sharing
 documents during due diligence.
 
-**Status: design closed, Phase 0 done, no code yet.** Accounts and credentials exist
-(`.env` is populated); the next step is Phase 1 of `docs/roadmap.md` — a **deployed**
-skeleton, not a local one.
+**Status: design closed. Phases 0–2 shipped; Phase 3 (Files) is next.** The API serves the
+folder browser end to end — `AccessScope`, the node repository with its raw-SQL tree
+statements, and the four node endpoints — and the web app browses, creates, renames and
+deletes folders against it. Phase 3 runs as **two sessions**, S1 backend and S2 web; each
+starts from its brief in gitignored `notes/issues/phase-3/issues/`.
 
 ## Read before working
 
@@ -15,7 +17,7 @@ Load only what the task needs — these are not all required at once.
 | ---------------------- | -------------------------------------------------------------------------------------------------------- |
 | `CONTEXT.md`           | Always. Domain vocabulary used in code, tests and UI.                                                    |
 | `BRIEF.md`             | The brief. **Read-only — never edit.**                                                                   |
-| `docs/decisions.md`    | Before changing anything architectural. 21 accepted decisions with rationale. Nothing is left undecided. |
+| `docs/decisions.md`    | Before changing anything architectural. 28 accepted decisions with rationale. Nothing is left undecided. |
 | `docs/data-model.md`   | Schema work, migrations, queries, indexes, invariants.                                                   |
 | `docs/architecture.md` | Layers, access control, upload flow, error contract, folder layout.                                      |
 | `docs/roadmap.md`      | Always, before picking up work. Task-level plan, per-phase scope, descope order.                         |
@@ -103,13 +105,25 @@ absence caused rework.
   explicitly says to (Phase 2 writes the scope-exception inventory into
   `architecture.md`). Documentation drift is how a phase ends without producing anything
   runnable.
-- **Verify, do not predict.** For anything outside this repository — cloud console UIs,
-  provider behaviour, library APIs — check it or ask. Never write instructions, or assert
-  how an external system behaves, from memory. A console UI that "has no page for this"
-  usually has one now.
+- **Verify, do not predict — and that includes this repository's own code.** For anything
+  outside it — cloud console UIs, provider behaviour, library APIs — check it or ask.
+  Never write instructions, or assert how an external system behaves, from memory. A
+  console UI that "has no page for this" usually has one now. The same rule applies
+  *inside*: never state how a query, a guard, a transaction or a repository method behaves
+  without opening the file in the same session and citing `file:line`. Reasoning from
+  `docs/` instead of the source has already produced a finding whose severity was backwards
+  — `findInScope` returns rows the design docs read as unreachable.
+- **A review is a report, not a dialogue.** "Verify these proposals" means a bounded
+  findings list — each claim checked against the code, each with `file:line`, classified
+  fits / additive / breaking / deferrable, closing with go or no-go. That is the shape
+  `notes/forward-compat-pass.md` prescribes and it is timeboxed to 15–20 minutes. The
+  design is closed, so a multi-round question-and-answer review can only yield a clause
+  appended to an existing checkbox, or a re-litigation of `decisions.md`. Neither is worth
+  a round.
 - **Say when the scope changes.** If a task is running past roughly twice its expected
   size, stop and report instead of continuing. Report the overrun before starting the
-  work, not after being asked about it.
+  work, not after being asked about it. State the expected output and cost in one line
+  *before* starting anything review-shaped, then hold yourself to it.
 
 ## Stop and ask
 

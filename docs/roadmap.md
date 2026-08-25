@@ -255,7 +255,7 @@ where the *kind* of work changes.
 
 | Session | Sections | Gate |
 |---|---|---|
-| **S1 Backend** | `StorageService`, throttler, `blob.repository.ts`, presign, complete, auto-suffix, content URL, `NodeRepository.createFile`, move endpoint, **the whole contract reshape** (limits, upload schemas, content response), both integration tests, mixed-data listing | `typecheck && lint && test` green, **and `StorageService` verified against the real GCS bucket** |
+| **S1 Backend** | `StorageService`, throttler, `blob.repository.ts`, presign, complete, auto-suffix, content URL, `NodeRepository.createFile`, the move **endpoint**, **the whole contract reshape** (limits, upload schemas, content response), all three integration tests, mixed-data listing | `typecheck && lint && test` green, **and `StorageService` verified against the real GCS bucket** |
 | **S2 Web** | dropzone + file drag-and-drop, per-file progress and cancel, PDF preview, `NodeRoute` dispatch on `node.type`, the file `410` screen, rename / delete file, "Move to…" dialog, drag-and-drop move | the four file flows walked in a browser, each with its loading, empty and error states |
 
 The contract reshape is in S1 for the Phase 2 reason: S2 cannot start against a shape that
@@ -329,7 +329,22 @@ Phase 3 turns that `<span>` into a `Link`.
 - [ ] `POST /rooms/:roomId/uploads/presign`: validation, advisory quota check over the
       **batch's summed size**, `PENDING` blobs, rate limit keyed on the session `userId` —
       not `req.ip`, which behind the Vercel rewrite is the proxy for every caller.
-      `Content-Type: application/pdf` signed into the PUT
+      `Content-Type: application/pdf` signed into the PUT. Two details that fail *silently*
+      if missed, both verified against the libraries rather than assumed:
+      - **`ThrottlerGuard` is registered on the controller, not as an `APP_GUARD`** —
+        `@UseGuards(JwtAuthGuard, ThrottlerGuard)`, in that order. NestJS runs guards
+        global → controller → route, so a global throttler executes *before* the
+        controller's `JwtAuthGuard` and `req.user` is still undefined. `getTracker` reads
+        `req.user.userId` (`SessionContext` has `userId`, not `id`) and **throws rather
+        than falling back to `req.ip`**: this route sits behind the session guard, so a
+        missing user means a broken guard chain, and an IP fallback would hide it behind a
+        working-looking limit shared by every caller
+      - **`signableHeaders: new Set(['content-type'])` must be passed to `getSignedUrl`** —
+        non-`x-amz-*` headers are not signed by default, so without it the URL accepts any
+        content type and "`Content-Type` signed into the PUT" is not true. Nothing catches
+        this: the type is checked again by `HEAD` at complete, so the tests still pass.
+        Set `expiresIn` explicitly while there — it defaults to 900 s in the SDK, and an
+        inherited default is not a chosen one
 - [ ] `POST /rooms/:roomId/uploads/complete`, **one file per call**: `HEAD` **before** the
       transaction opens; then `pg_advisory_xact_lock(hashtextextended(dataRoomId, 0))`,
       authoritative quota check, the conditional `PENDING → READY` flip, node insert via
@@ -347,10 +362,18 @@ Phase 3 turns that `<span>` into a `Link`.
       from `node.name`, RFC 5987 encoded. It resolves through `resolveLiveNode`, so `404`
       and `410` come for free. **Not guarded by `role`** — a `VIEWER` must be able to open a
       file shared with them
-- [ ] Two stale doc comments still name the pre-#28 URL and will be read as authoritative:
-      `packages/contracts/src/node.ts:110` and `apps/api/src/modules/node/node.service.ts:96`
-      both say a `FILE` is born in `POST /api/uploads/complete`. The sentence stays true —
-      only the path changes. Fix them in the same commit as `createFile`
+- [ ] `NodeRepository.createFile` — the `FILE` sibling of `createFolder`, same shape:
+      `randomUUID()` before the insert, `` path = `${parentPath}${id}/` `` with the trailing
+      slash, `blobId` and `size` set, aggregate delta of `{ size: +n, files: +1 }`. It takes
+      the caller's `tx`, because upload-complete owns the transaction. In the same commit,
+      fix the two stale doc comments that still name the pre-#28 URL and will be read as
+      authoritative: `packages/contracts/src/node.ts:114` and
+      `apps/api/src/modules/node/node.service.ts:96` both say a `FILE` is born in
+      `POST /api/uploads/complete`. The sentence stays true — only the path changes
+- [ ] Upload and content **schemas** in `packages/contracts`, beside the limits above:
+      presign body and response, complete body, and the content response. S2 cannot begin
+      against a shape that is still moving, which is why the whole contract reshape lands
+      in S1 — the limits, these schemas, and nothing left for later
 - [ ] Dropzone: multiple files, **drag-and-drop**, per-file progress via `XMLHttpRequest`,
       per-file error rows, cancel. **Native HTML5 DnD, no new dependency** — `DataTransfer`
       is the only way to read dropped files anyway, and `dnd-kit` handles pointer drags but
@@ -363,22 +386,31 @@ Phase 3 turns that `<span>` into a `Link`.
 - [ ] The deleted-**file** `410` screen, owed by Phase 2 and unscheduled until now
       (`architecture.md` § `410` on both node types). It is a **second component, not a
       second destination**: the copy names a file, the link goes back to the Data Room
-      root exactly as the folder screen's does. A `410` carries no body, so on a direct
-      load the client cannot know the type — the file wording is reachable only when the
+      root exactly as the folder screen's does. The `410` body carries a message but **not
+      the node type**, so on a direct load the client cannot know which wording applies —
+      the file wording is reachable only when the
       reader arrived from the preview route with the type already in hand, and the folder
       screen is the fallback everywhere else
 - [ ] Rename file (`409` + dialog), delete file
-- [ ] Move file via the **"Move to…" dialog** with a folder picker — the primary
-      affordance per decision #19, and the one that satisfies the brief on its own.
-      `POST /:nodeId/move` per `architecture.md` § Node endpoints → Move: cycle guard
-      (`422`, not `409`), aggregate transfer over the whole subtree, `409` on name
-      conflict, live-`FOLDER` destination, all in one transaction
+- [ ] **`POST /:nodeId/move` — the endpoint, in S1.** Split out from the dialog below
+      because it is the heaviest transaction in the phase and it belongs to the other
+      session: `architecture.md` § Move covers the parent change, the descendant `path`
+      rewrite and **both halves** of the aggregate transfer in one transaction, with cycle
+      guard (`422`, not `409`), `409` on name conflict, and a live-`FOLDER` destination.
+      Type-agnostic, so it serves files and folders from one repository method
+- [ ] The **"Move to…" dialog** with a folder picker, in S2 — the primary affordance per
+      decision #19, and the one that satisfies the brief on its own. UI only: the endpoint
+      above is already done and tested when this starts
 - [ ] **Drag-and-drop move** between folders, alongside the "Move to…" dialog
-- [ ] **Two integration tests** (decision #26), on the harness Phase 2 built:
+- [ ] **Three integration tests** (decision #26), on the harness Phase 2 built:
       - `23505` on upload, asserting the retry re-runs the **whole** transaction
       - move cycle guard rejects a folder into its own descendant. `BRIEF.md` only
         requires moving a *file*, and no phase builds a folder-move UI — the guard lives
         in the shared repository move method, which this test exercises directly
+      - the presign rate limit is **per user, not per IP**: two sessions with different
+        `userId` hit the limit independently, and exhausting one leaves the other passing.
+        Without this the `getTracker` override is asserted nowhere and an IP fallback
+        looks identical in a single-user test
 - [ ] Extend the Phase 2 listing coverage to **mixed data** — a folder holding both
       folders and files, paged across a boundary. Nearly free on the existing harness, and
       it is the only thing that actually executes the enum sort order and the keyset's
