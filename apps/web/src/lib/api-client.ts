@@ -16,6 +16,15 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * `true` for a 4xx. Every 4xx in the error contract is a settled answer — not found,
+ * gone, taken, rejected — so retrying one only delays the screen that is meant to render.
+ * 5xx and network failures stay retryable.
+ */
+export function isClientError(error: Error): boolean {
+  return error instanceof ApiError && error.status >= 400 && error.status < 500;
+}
+
 /** The API is not reachable at all — offline, dev server down, proxy misconfigured. */
 export class NetworkError extends Error {
   constructor(cause: unknown) {
@@ -74,13 +83,43 @@ export async function apiFetch<T>(
   return parsed.data;
 }
 
-/** `POST /api/auth/logout` replies 204 with no body, so it bypasses `apiFetch`. */
-export async function apiPostNoContent(path: `/api/${string}`): Promise<void> {
+/**
+ * A mutation that sends JSON and gets a parsed body back — `POST` to create a folder,
+ * `PATCH` to rename one. It goes through `apiFetch`, so a `409`, a `410` or a `422`
+ * arrives at the caller as an `ApiError` still carrying its status.
+ */
+export async function apiSend<T>(
+  path: `/api/${string}`,
+  schema: ZodType<T>,
+  method: 'POST' | 'PATCH',
+  body: unknown,
+): Promise<T> {
+  return apiFetch(path, schema, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * A call that replies `204` with no body: `POST /api/auth/logout`, and
+ * `DELETE /api/rooms/:roomId/nodes/:nodeId`, whose warning dialog was already rendered
+ * from the folder's own aggregates. There is nothing to parse, so it bypasses `apiFetch`
+ * — but it still raises the same `ApiError`, because deleting a folder someone else has
+ * already deleted is a `410` with its own screen.
+ */
+export async function apiNoContent(
+  path: `/api/${string}`,
+  method: 'POST' | 'DELETE' = 'POST',
+): Promise<void> {
   let response: Response;
   try {
-    response = await fetch(path, { method: 'POST', credentials: 'same-origin' });
+    response = await fetch(path, { method, credentials: 'same-origin' });
   } catch (cause) {
     throw new NetworkError(cause);
   }
-  if (!response.ok) throw new ApiError(response.status, response.statusText);
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    throw new ApiError(response.status, extractMessage(body, response.statusText));
+  }
 }

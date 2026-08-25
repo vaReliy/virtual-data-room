@@ -69,6 +69,69 @@ otherwise see.
   that reads them from the browse endpoint lands in the next session, along with the
   removal of its `dataRooms.find` ownership gate.
 
+### Added — Phase 2, node browser (web)
+
+- **`features/node-browser/`.** One `NodeBrowser` component serves the room root and every
+  folder inside it: breadcrumbs, a folder table, the create / rename / delete dialogs, and
+  the four error screens. The API answers both locations with one shape, so there is no
+  second code path for "the root".
+- **Route `rooms/:roomId/n/:nodeId`,** plus a rewritten `rooms.$roomId.tsx`. **Both lost
+  their ownership gate** — see the note below.
+- **Folder rows carry their own subtree totals.** Read straight off the denormalized
+  counters on each row, so a folder with ten thousand descendants renders in the same work
+  as an empty one. This is the README's scaling claim on screen rather than asserted.
+- **Keyset pagination** via `useInfiniteQuery` over the opaque `nextCursor`, with a
+  "Load more" control. Page size is the server's 50.
+- **`dataRooms: []` renders the shell's error state** (decision #23), in `SessionGate`
+  above every authenticated route. There is no create-room affordance to offer instead.
+- **`cursor: pointer` restored** on `button` and `[role="button"]` in `index.css`
+  `@layer base`, over Tailwind v4's Preflight. Global so it also covers Radix triggers.
+
+### Notes that the diff does not make obvious — Phase 2 web
+
+- **The route must never decide what exists, and that is a security property.** There is
+  no `dataRooms.find(...)` gate in either room route. `GET /api/me` lists the rooms the
+  caller *owns*, not the rooms they can *reach*; in Phase 4 a `USER`-share recipient
+  browses these same private routes, and an ownership gate would 404 them in the client
+  before the API was ever asked. Reintroducing one — it looks like a harmless guard —
+  breaks sharing one door over from wherever it is added.
+- **Four statuses, four screens, and collapsing any two is the failure mode.** `404` "Not
+  found", `410` "This folder was deleted by the owner" with a link to the room root, `409`
+  inline in the dialog with no auto-suffix, `422` on the field. `ApiError.status` is
+  preserved from `fetch` to the component for exactly this reason, and 4xx is never
+  retried — a retried `410` is a second of fake "loading" over an answer the server gave
+  instantly.
+- **The `410` screen is a dead end with a way back, never a redirect.** There is no
+  nearest-live-ancestor to bounce to: the subtree delete stamps every ancestor in one
+  statement, so any bounce lands at the room root anyway. It fires only for a caller
+  standing *inside* the deleted folder; a deleted child just stops appearing in its
+  parent's next listing.
+- **One mutation invalidates one browse key, and never the session key.** Aggregates
+  travel with what is being viewed (decision #24), so the header and the table are the
+  same query and refetch together. Invalidating `queryKeys.session` on a content mutation
+  is precisely the coupling #24 removed.
+- **Dialog state lives inside `DialogContent` on purpose.** Radix unmounts a closed
+  dialog, so the typed name, the touched flag and the last `409` reset for free. Hoisting
+  that state one level up gives a dialog that reopens still showing the previous attempt's
+  conflict, and no reset effect to forget.
+- **The `409` sentence in the dialog is `node.errors.ts`'s, verbatim.** The client shows
+  `ApiError.message` rather than composing its own wording, because the collision is on
+  `lower(name)` — `legal` conflicts with `Legal` — and an invented "That name is taken"
+  would hide why. Editing that exception message edits the UI.
+- **The dialogs validate with `nodeNameSchema` directly, not through a `react-hook-form`
+  resolver** as `architecture.md` § `nodeNameSchema` describes. The dependency is not
+  installed and was not added. The invariant the doc protects is intact — one schema drives
+  both request bodies and both dialogs — only the mechanism differs, and it is contained
+  entirely within `node-name-dialog.tsx`.
+- **Breadcrumbs are rendered exactly as the API sends them.** They arrive already clipped
+  to the caller's scope root, and nothing on the client reconstructs ancestry or climbs
+  past a `parentId: null`. A client-side rebuild from `parentId` would walk straight past
+  the boundary, and in an M&A context a folder name is itself confidential.
+- **`dataRooms: []` has never been seen on screen.** Provisioning is idempotent and runs
+  on every sign-in, so reaching it means hand-deleting the `data_rooms` row. The code path
+  is `SessionGate` → `NoDataRoomState`; it is the one state in this phase verified by
+  reading rather than by looking.
+
 ### Added — Phase 1, backend skeleton
 
 - **Workspace.** pnpm workspaces with `apps/api` and `packages/contracts`. Every

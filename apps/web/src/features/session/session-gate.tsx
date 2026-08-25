@@ -2,6 +2,7 @@ import { Navigate, Outlet, useOutletContext } from 'react-router';
 import type { MeResponse } from '@dr/contracts';
 
 import { ErrorState } from './error-state';
+import { NoDataRoomState } from './no-data-room-state';
 import { AppShell, AppShellSkeleton } from './app-shell';
 import { isUnauthenticated, useSession } from './use-session';
 
@@ -27,6 +28,22 @@ export function SessionGate() {
           }}
         />
       </div>
+    );
+  }
+
+  // `dataRooms: []` is an error, not an empty state (decision #23): provisioning is
+  // idempotent and runs on every sign-in, so an empty list means it failed. It is caught
+  // in the shell rather than per route, because no authenticated screen below can do
+  // anything useful without a room.
+  if (session.data.dataRooms.length === 0) {
+    return (
+      <AppShell user={session.data.user}>
+        <NoDataRoomState
+          onRetry={() => {
+            void session.refetch();
+          }}
+        />
+      </AppShell>
     );
   }
 

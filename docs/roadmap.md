@@ -180,11 +180,11 @@ excluding already-deleted rows; and `23505` mapping to `409` on create and renam
       node with a `200`, which decision #6 calls the worst failure this system has. Every
       caller goes through this helper, so no call site ever sees `deletedAt` at all
 - [x] Write the scope-exception inventory into `architecture.md` while building it
-- [ ] Restore `cursor: pointer` on `button` and `[role="button"]` in `index.css`
+- [x] Restore `cursor: pointer` on `button` and `[role="button"]` in `index.css`
       `@layer base`. Tailwind v4's Preflight sets `cursor: default` to match the browser,
       which reads as a dead control. Global on purpose — it also covers the Radix
       triggers this phase introduces. Rides along with the first UI task below
-- [ ] `nodeNameSchema` in `packages/contracts` — trim, 1–255, rejected characters — wired
+- [x] `nodeNameSchema` in `packages/contracts` — trim, 1–255, rejected characters — wired
       into both request bodies and both dialog resolvers (`architecture.md` § Node
       endpoints)
 - [x] Create folder, nested folders, per `architecture.md` § Node endpoints: `POST`,
@@ -195,7 +195,7 @@ excluding already-deleted rows; and `23505` mapping to `409` on create and renam
       `scope.rootNodeId === null`, plus `role` off the `AccessScope`. Narrow
       `meResponseSchema` to `{ id, name }` per room and drop the aggregates the shell
       reads today from `/api/me`
-- [ ] List folder contents — keyset pagination on `(type, lower(name))`, folders first.
+- [x] List folder contents — keyset pagination on `(type, lower(name))`, folders first.
       **Raw SQL in `node.repository.ts`, not Prisma**: `nodes_listing` is keyed on
       `COALESCE(parent_id, data_room_id)`, which a Prisma `where: { parentId }` does not
       match, and Prisma can express neither `ORDER BY lower(name)` nor the row-wise keyset
@@ -203,10 +203,10 @@ excluding already-deleted rows; and `23505` mapping to `409` on create and renam
       `deleted_at IS NULL` itself. Fix the page size here and state what `nextCursor` is
       when the last page is reached. Each folder row shows its own subtree totals — the
       README's scaling answer, on screen rather than only asserted
-- [ ] The deleted-**folder** `410` screen (`architecture.md` § Error contract): back to
+- [x] The deleted-**folder** `410` screen (`architecture.md` § Error contract): back to
       the Data Room root. Its file twin waits for Phase 3 — no file can exist yet, so it
       would be neither demoable nor testable here
-- [ ] Route `rooms.$roomId.n.$nodeId.tsx` + the browser shell it renders into. Navigation
+- [x] Route `rooms.$roomId.n.$nodeId.tsx` + the browser shell it renders into. Navigation
       lives here, so breadcrumbs and the folder table both depend on it landing first.
       **The route must not check ownership** — no `dataRooms.find(...)` gate as
       `rooms.$roomId.tsx:26` does today. It asks the browser endpoint and renders the
@@ -221,11 +221,11 @@ excluding already-deleted rows; and `23505` mapping to `409` on create and renam
       names need a second, multi-id read. Scope-bounded and live-only, and it goes in the
       scope-exception inventory alongside `findInScope`. The result is ordered by `path`,
       not by whatever order the rows come back in
-- [ ] Rename folder (`409` + inline dialog)
+- [x] Rename folder (`409` + inline dialog)
 - [x] Delete subtree: one `UPDATE ... WHERE path LIKE ... AND deleted_at IS NULL`,
       delta from `RETURNING type, size`. The `UPDATE` and the ancestor delta are **one
       transaction** — a delta applied outside it can be lost against a stamp that was not
-- [ ] Delete warning showing real subtree counts
+- [x] Delete warning showing real subtree counts
 - [x] `applyAggregateDelta` helper — **four** call sites: create and delete here,
       upload-complete and move in Phase 3. Restore is out of scope (decision #6 ships no
       trash UI), so it is not one of them and never will be
@@ -238,7 +238,7 @@ excluding already-deleted rows; and `23505` mapping to `409` on create and renam
         a second delete decrements ancestors twice, and the wrong number surfaces in the
         delete warning — a graded requirement of `BRIEF.md`
       - `23505` on folder rename, asserting `409` and that no suffix is invented
-- [ ] `dataRooms: []` renders the shell's **error** state, not an empty one (decision #23).
+- [x] `dataRooms: []` renders the shell's **error** state, not an empty one (decision #23).
       A user always owns exactly one room, so an empty list means provisioning failed —
       there is no create-room route, no room list and no switcher to offer instead
 

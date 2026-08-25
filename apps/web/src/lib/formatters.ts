@@ -20,3 +20,14 @@ export function formatBytes(bytes: number): string {
 export function pluralize(count: number, singular: string, plural = `${singular}s`): string {
   return `${String(count)} ${count === 1 ? singular : plural}`;
 }
+
+/**
+ * `updatedAt` crosses the wire as an ISO 8601 string. Rendered in the reader's own
+ * locale and timezone rather than a fixed one: a due-diligence reader is very often in a
+ * different country from the owner who uploaded the document.
+ */
+export function formatTimestamp(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  return parsed.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}

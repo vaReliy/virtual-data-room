@@ -1,7 +1,7 @@
 import { meResponseSchema, type MeResponse } from '@dr/contracts';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 
-import { ApiError, apiFetch, apiPostNoContent } from '@/lib/api-client';
+import { ApiError, apiFetch, apiNoContent, isClientError } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 
 /**
@@ -17,8 +17,7 @@ export function useSession(): UseQueryResult<MeResponse, Error> {
   return useQuery({
     queryKey: queryKeys.session,
     queryFn: () => apiFetch('/api/me', meResponseSchema),
-    retry: (failureCount, error) =>
-      !(error instanceof ApiError && error.status >= 400 && error.status < 500) && failureCount < 2,
+    retry: (failureCount, error) => !isClientError(error) && failureCount < 2,
   });
 }
 
@@ -35,7 +34,7 @@ export function isUnauthenticated(error: Error | null): boolean {
 export function useLogout(): { logout: () => void; isPending: boolean } {
   const queryClient = useQueryClient();
   const mutation = useMutation({
-    mutationFn: () => apiPostNoContent('/api/auth/logout'),
+    mutationFn: () => apiNoContent('/api/auth/logout'),
     onSettled: () => {
       queryClient.clear();
       // A full document load, not a client-side navigation: it guarantees no component

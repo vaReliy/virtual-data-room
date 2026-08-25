@@ -5,6 +5,7 @@ import { HomeRoute } from '@/routes/home';
 import { LoginRoute } from '@/routes/login';
 import { NotFoundRoute } from '@/routes/not-found';
 import { PrivacyRoute } from '@/routes/privacy';
+import { NodeRoute } from '@/routes/rooms.$roomId.n.$nodeId';
 import { RoomRoute } from '@/routes/rooms.$roomId';
 import { TermsRoute } from '@/routes/terms';
 
@@ -25,6 +26,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, Component: HomeRoute },
       { path: 'rooms/:roomId', Component: RoomRoute },
+      { path: 'rooms/:roomId/n/:nodeId', Component: NodeRoute },
     ],
   },
   { path: '*', Component: NotFoundRoute },

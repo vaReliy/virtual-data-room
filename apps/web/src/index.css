@@ -127,4 +127,17 @@
   html {
     @apply font-sans;
   }
+  /*
+   * Tailwind v4's Preflight sets `cursor: default` on buttons to match the browser's own
+   * default. On a web application it reads as a dead control, so it is restored here —
+   * globally on purpose, since `[role="button"]` also covers the Radix triggers (dialog,
+   * dropdown menu) this phase introduces, which are not `<button>` elements everywhere.
+   *
+   * `:disabled` is excluded: a disabled control genuinely is not clickable, and a pointer
+   * over one promises something that will not happen.
+   */
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
 }
