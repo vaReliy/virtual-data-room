@@ -7,7 +7,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://REPLACE_WITH_CLOUD_RUN_URL/api/:path*"
+      "destination": "https://dataroom-api-naortdwt2q-ey.a.run.app/api/:path*"
     },
     {
       "source": "/(.*)",

@@ -100,7 +100,7 @@ assistant work.
       condition pins the **numeric** `repository_id` and `repository_owner_id` plus
       `ref == 'refs/heads/main'`; the numeric ids are deliberate, since a released
       repository *name* can be claimed by someone else and this repository is public
-- [ ] *(owner)* Run the bootstrap script once in Cloud Shell, where gcloud is already
+- [x] *(owner)* Run the bootstrap script once in Cloud Shell, where gcloud is already
       installed and already authenticated
 - [x] Multi-stage `Dockerfile` for the API using `pnpm deploy --filter`, plus an
       entrypoint that runs `prisma migrate deploy` with bounded retries and exponential
@@ -111,11 +111,11 @@ assistant work.
       loop — every failure reproducible locally is spent here, before the first push
 - [x] `.github/workflows/ci.yml` (decision #18) and `deploy.yml`. `deploy.yml` triggers on
       `workflow_dispatch` **only**, and grants `id-token: write` in the deploy job alone
-- [ ] *(owner)* Push `main`. Then: trigger with `gh workflow run`, read `gh run view --log`,
+- [x] *(owner)* Push `main`. Then: trigger with `gh workflow run`, read `gh run view --log`,
       fix, repeat. A re-trigger needs no further push when the cause is configuration
-- [ ] Cloud Run service configured in the same region as the database, reading its secrets
+- [x] Cloud Run service configured in the same region as the database, reading its secrets
       from Secret Manager
-- [ ] `vercel.json` with the `/api/*` rewrite to the Cloud Run URL
+- [x] `vercel.json` with the `/api/*` rewrite to the Cloud Run URL
 - [ ] *(owner)* Connect the repository to Vercel, building `apps/web`
 - [ ] *(owner)* Add the Vercel origin and the callback redirect URI to the OAuth client,
       add the Vercel origin to bucket CORS, and publish the consent screen to
