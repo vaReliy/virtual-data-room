@@ -155,7 +155,12 @@ jobs:
       # publicly reachable, so this is a real check that the revision serves traffic —
       # not merely that gcloud reported success.
       - name: Smoke-test the revision
+        # Passed through env rather than interpolated into the shell command. The value
+        # comes from `gcloud run services describe`, so it is not attacker-controlled —
+        # but interpolating anything into a `run:` block is the pattern that goes wrong
+        # the moment the source of the value changes, and it costs nothing to avoid.
+        env:
+          SERVICE_URL: ${{ steps.deployed.outputs.url }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --max-time 30 \
-            "${{ steps.deployed.outputs.url }}/api/health"
+          curl --fail --silent --show-error --max-time 30 "${SERVICE_URL}/api/health"

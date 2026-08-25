@@ -63,9 +63,12 @@ otherwise see.
 - **`prisma` is a runtime dependency now, not a dev one.** The entrypoint runs
   `prisma migrate deploy`, and `pnpm deploy --prod` strips devDependencies — so leaving it
   in `devDependencies` produces an image that builds cleanly and then fails to start.
-- **The build stage sets a fake `DIRECT_URL`.** `prisma.config.ts` resolves it when the
-  config file is _loaded_, so even `prisma generate` — which never opens a connection —
-  fails without it. There is no database at build time and there must not be one.
+- **The Docker build stage and `ci.yml` both set a fake `DIRECT_URL`.**
+  `prisma.config.ts` resolves it when the config file is _loaded_, so even
+  `prisma generate` — which never opens a connection — fails without it. Since that
+  command is @dr/api's postinstall, the failure lands inside `pnpm install` before any
+  check runs. Every context that runs the Prisma CLI without a database needs this;
+  locally it is invisible because `.env` supplies the real value.
 - **`openssl` is installed in both stages.** The slim Node image ships libssl3 but not the
   binary Prisma probes for, so Prisma silently selects its openssl-1.1.x engine. The
   failure surfaces at the first migration as an engine error, not as a missing package.

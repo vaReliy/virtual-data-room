@@ -19,6 +19,18 @@ permissions:
 jobs:
   checks:
     runs-on: ubuntu-latest
+
+    # `prisma.config.ts` resolves env('DIRECT_URL') when the config file is LOADED, so
+    # every Prisma CLI invocation needs it set — including `prisma generate`, which runs
+    # as @dr/api's postinstall, reads only the schema and never opens a connection.
+    # Locally the variable comes from `.env`; there is none here, and there must not be.
+    #
+    # This placeholder is never dialled. Nothing in this workflow touches a database:
+    # decision #16 puts integration tests at the end of Phase 4, and when they arrive they
+    # bring a service container with a real connection string of their own.
+    env:
+      DIRECT_URL: postgresql://ci:ci@127.0.0.1:5432/ci
+
     steps:
       - uses: actions/checkout@v5
 
