@@ -40,7 +40,7 @@ otherwise see.
   arrives, cutting first-contentful-paint from 2304 ms to 1268 ms on a throttled Slow 4G
   connection against the production build.
 
-### Added — Phase 1, ship (deploy mechanism; not yet deployed)
+### Added — Phase 1, ship (deployed)
 
 - **`scripts/gcloud-bootstrap.sh`.** One-time, idempotent Google Cloud setup, run by the
   owner in Cloud Shell: APIs, an Artifact Registry repository, six Secret Manager secrets,
@@ -57,6 +57,12 @@ otherwise see.
 - **`vercel.json`.** The `/api/*` rewrite to Cloud Run and the SPA fallback (decision #10).
 - **`README.md`.** Setup, local development and where each credential belongs. The project
   overview, ERD and hosted links are Phase 6's.
+
+**Deployed and reachable.** Signing in with Google on the Vercel URL lands on an empty
+Data Room served from Neon.
+
+- SPA — https://virtual-data-room-gamma.vercel.app
+- API — https://dataroom-api-naortdwt2q-ey.a.run.app
 
 ### Notes that the diff does not make obvious — ship
 
@@ -90,9 +96,19 @@ otherwise see.
   `repository_owner_id`, plus `ref == 'refs/heads/main'`. A repository _name_ is released
   when the repository is deleted and can be claimed by someone else; this repository is
   public.
-- **`vercel.json` still carries a placeholder destination.** The Cloud Run URL does not
-  exist until the first deploy. Replace it before connecting the Vercel project, or the
-  SPA deploys successfully and every API call 404s.
+- **`vercel.json` hard-codes the Cloud Run hostname.** It could not be written before the
+  first deploy — the URL does not exist until then, which is the dependency cycle the
+  roadmap's Ship order exists to walk. Recreating the Cloud Run service from scratch
+  changes the hostname and this file has to follow; ordinary redeploys keep it.
+- **Vercel installs only the web half of the workspace**
+  (`--filter @dr/web...`). A plain install runs @dr/api's `prisma generate` postinstall,
+  which fails there for want of `DIRECT_URL`, and installs NestJS and Prisma engines that
+  the SPA build never imports — 865 packages instead of 531. The trailing `...` is
+  load-bearing: without it `@dr/contracts` is excluded and the build's first command
+  compiles it.
+- **The Vercel origin carries a `-gamma` suffix.** `virtual-data-room.vercel.app` was
+  taken. The suffix is part of `APP_URL`, the OAuth authorized origin and the redirect
+  URI, and Google compares redirect URIs as exact strings.
 
 ### Notes that the diff does not make obvious
 

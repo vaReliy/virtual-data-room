@@ -116,11 +116,11 @@ assistant work.
 - [x] Cloud Run service configured in the same region as the database, reading its secrets
       from Secret Manager
 - [x] `vercel.json` with the `/api/*` rewrite to the Cloud Run URL
-- [ ] *(owner)* Connect the repository to Vercel, building `apps/web`
+- [x] *(owner)* Connect the repository to Vercel, building `apps/web`
 - [ ] *(owner)* Add the Vercel origin and the callback redirect URI to the OAuth client,
       add the Vercel origin to bucket CORS, and publish the consent screen to
       *In production*
-- [ ] Re-run the deploy so Cloud Run receives the Vercel origin in its environment — the
+- [x] Re-run the deploy so Cloud Run receives the Vercel origin in its environment — the
       session cookie and CORS settings depend on knowing it
 
 **Done when:** sign in with Google on the deployed Vercel URL and land on an empty Data
