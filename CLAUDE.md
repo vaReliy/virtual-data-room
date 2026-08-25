@@ -11,14 +11,14 @@ skeleton, not a local one.
 
 Load only what the task needs — these are not all required at once.
 
-| File | When to read it |
-|---|---|
-| `CONTEXT.md` | Always. Domain vocabulary used in code, tests and UI. |
-| `BRIEF.md` | The brief. **Read-only — never edit.** |
-| `docs/decisions.md` | Before changing anything architectural. 21 accepted decisions with rationale. Nothing is left undecided. |
-| `docs/data-model.md` | Schema work, migrations, queries, indexes, invariants. |
-| `docs/architecture.md` | Layers, access control, upload flow, error contract, folder layout. |
-| `docs/roadmap.md` | Always, before picking up work. Task-level plan, per-phase scope, descope order. |
+| File                   | When to read it                                                                                          |
+| ---------------------- | -------------------------------------------------------------------------------------------------------- |
+| `CONTEXT.md`           | Always. Domain vocabulary used in code, tests and UI.                                                    |
+| `BRIEF.md`             | The brief. **Read-only — never edit.**                                                                   |
+| `docs/decisions.md`    | Before changing anything architectural. 21 accepted decisions with rationale. Nothing is left undecided. |
+| `docs/data-model.md`   | Schema work, migrations, queries, indexes, invariants.                                                   |
+| `docs/architecture.md` | Layers, access control, upload flow, error contract, folder layout.                                      |
+| `docs/roadmap.md`      | Always, before picking up work. Task-level plan, per-phase scope, descope order.                         |
 
 ## Rules
 
@@ -92,22 +92,22 @@ do not report a phase complete with a failing gate — say which gate fails.
 
 ## Working rules
 
-Four rules learned the expensive way, during design. Each one closes a mistake that was
-actually made and cost real budget.
+Four rules that close mistakes actually made during design. Each one exists because its
+absence caused rework.
 
 - **A decision does not exist until it has a task.** Anything written into
   `decisions.md` must have a corresponding checkbox in `roadmap.md`. A decision recorded
-  in one document and unscheduled in the other is an unpriced commitment — it looks
+  in one document and unscheduled in the other is an untracked commitment — it looks
   planned and is not.
 - **During implementation phases, do not edit `docs/`.** The exception is where a task
   explicitly says to (Phase 2 writes the scope-exception inventory into
-  `architecture.md`). Documentation drift is how a phase spends its budget without
-  producing anything runnable.
+  `architecture.md`). Documentation drift is how a phase ends without producing anything
+  runnable.
 - **Verify, do not predict.** For anything outside this repository — cloud console UIs,
   provider behaviour, library APIs — check it or ask. Never write instructions, or assert
   how an external system behaves, from memory. A console UI that "has no page for this"
   usually has one now.
-- **Say when the cost changes.** If a task is running past roughly twice its expected
+- **Say when the scope changes.** If a task is running past roughly twice its expected
   size, stop and report instead of continuing. Report the overrun before starting the
   work, not after being asked about it.
 

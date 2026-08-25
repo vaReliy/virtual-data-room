@@ -1,0 +1,57 @@
+# Checks only (decision #18). No build, no deploy: Vercel builds the SPA on its own and
+# Cloud Run is deployed by deploy.yml, which is deliberately manual.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch cancels the first. Nothing here has side effects, so
+# there is no reason to pay for a run whose result is already stale.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Order matters: pnpm must exist before setup-node, because `cache: pnpm` asks pnpm
+      # where its store is. Enabling corepack afterwards leaves setup-node without a pnpm
+      # to interrogate and the step fails with a confusing "Unable to locate executable".
+      - name: Enable corepack
+        run: corepack enable
+
+      # Spelled inline rather than through a version file: `mise.toml` already pins the
+      # local toolchain and root package.json carries `engines`, and a third file saying
+      # "22" is one more thing that can drift out of step with the other two.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      # --frozen-lockfile is the supply-chain gate, not a speed-up: it fails if the
+      # lockfile and the manifests disagree, and it fails while any dependency's install
+      # scripts are unapproved in `allowBuilds`.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # @dr/contracts emits the declarations both apps type-check against, so nothing
+      # below can pass without it. It is not a redundant build step.
+      - name: Build contracts
+        run: pnpm --filter @dr/contracts build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test

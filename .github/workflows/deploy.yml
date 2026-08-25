@@ -1,0 +1,161 @@
+# Deploys the API to Cloud Run (decisions #10 and #22).
+#
+# Authentication is Workload Identity Federation: GitHub's short-lived OIDC token is
+# exchanged for temporary Google credentials. There is no service-account key — not in
+# this repository, not in GitHub secrets, not on any development machine.
+#
+# Prerequisite, run once by the owner in Cloud Shell: `scripts/gcloud-bootstrap.sh`.
+# It prints the three repository variables this workflow reads.
+name: Deploy API
+
+# workflow_dispatch ONLY, deliberately. This repository is public, and a push trigger
+# widens the set of events that can reach the identity pool for no gain — a deploy here
+# is a decision, not a consequence of committing.
+on:
+  workflow_dispatch:
+    inputs:
+      app_url:
+        description: 'Public SPA origin, e.g. https://virtual-data-room.vercel.app. Leave empty to use the APP_URL repository variable.'
+        required: false
+        type: string
+
+# Two deploys of the same service at once produce two revisions racing to take traffic.
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: false
+
+# Read-only at the top level. `id-token: write` is granted in the deploy job alone
+# (decision #22) so that no other job in this file could ever mint an OIDC token.
+permissions:
+  contents: read
+
+env:
+  # Frankfurt, matching the Neon region. A cross-region hop would tax every database
+  # round-trip, and an API request makes several.
+  REGION: europe-west3
+  SERVICE: dataroom-api
+  AR_REPOSITORY: dataroom
+  # The account Cloud Run RUNS AS, created by scripts/gcloud-bootstrap.sh. It shares a
+  # name with the service today; they are separate things and the script can rename one
+  # without the other, so it is spelled out rather than derived from SERVICE.
+  RUNTIME_SA_ID: dataroom-api
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.deployed.outputs.url }}
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Fails early and by name rather than deep inside a gcloud command, where an empty
+      # variable becomes an unhelpful "invalid resource name".
+      - name: Check configuration
+        env:
+          APP_URL: ${{ inputs.app_url || vars.APP_URL }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          STORAGE_ENDPOINT: ${{ vars.STORAGE_ENDPOINT }}
+          STORAGE_REGION: ${{ vars.STORAGE_REGION }}
+          STORAGE_BUCKET: ${{ vars.STORAGE_BUCKET }}
+        run: |
+          missing=""
+          for name in GCP_PROJECT_ID GCP_WIF_PROVIDER GCP_SERVICE_ACCOUNT \
+                      GOOGLE_CLIENT_ID STORAGE_ENDPOINT STORAGE_REGION STORAGE_BUCKET; do
+            eval "value=\${$name:-}"
+            [ -n "$value" ] || missing="$missing $name"
+          done
+          [ -n "${APP_URL}" ] || missing="$missing APP_URL"
+          if [ -n "$missing" ]; then
+            echo "Missing repository variables:$missing" >&2
+            echo "Set them with: gh variable set <NAME> --body '<value>'" >&2
+            exit 1
+          fi
+
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      # Uses the credentials minted above, so the registry login is also key-free.
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push image
+        id: image
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          # Tagged by commit SHA, never by :latest. A Cloud Run revision then names the
+          # exact commit it is running, and a rollback is a redeploy of a known tag.
+          image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/${SERVICE}:${GITHUB_SHA}"
+          docker build -f apps/api/Dockerfile -t "$image" .
+          docker push "$image"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloud Run
+        id: deployed
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          IMAGE: ${{ steps.image.outputs.image }}
+          APP_URL: ${{ inputs.app_url || vars.APP_URL }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          STORAGE_ENDPOINT: ${{ vars.STORAGE_ENDPOINT }}
+          STORAGE_REGION: ${{ vars.STORAGE_REGION }}
+          STORAGE_BUCKET: ${{ vars.STORAGE_BUCKET }}
+        run: |
+          set -euo pipefail
+
+          # Derived, never configured separately. The callback URI is the single value
+          # that must agree between this service, the Vercel rewrite and the Google OAuth
+          # client; deriving it from APP_URL removes one of the three places it can be
+          # wrong. It must match the redirect URI registered on the OAuth client exactly.
+          callback="${APP_URL%/}/api/auth/google/callback"
+
+          # Note what is NOT here: no DATABASE_URL, no client secret, no session secret,
+          # no storage credentials. Those are Secret Manager references, resolved by
+          # Cloud Run at start-up, so no secret value ever passes through this file, this
+          # runner, or a workflow log.
+          gcloud run deploy "${SERVICE}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --image="${IMAGE}" \
+            --service-account="${RUNTIME_SA_ID}@${PROJECT_ID}.iam.gserviceaccount.com" \
+            --allow-unauthenticated \
+            --port=8080 \
+            --cpu=1 \
+            --memory=512Mi \
+            --min-instances=0 \
+            --max-instances=3 \
+            --timeout=60s \
+            --set-env-vars="NODE_ENV=production,APP_URL=${APP_URL},GOOGLE_CALLBACK_URL=${callback},GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID},STORAGE_ENDPOINT=${STORAGE_ENDPOINT},STORAGE_REGION=${STORAGE_REGION},STORAGE_BUCKET=${STORAGE_BUCKET}" \
+            --set-secrets="DATABASE_URL=dataroom-database-url:latest,DIRECT_URL=dataroom-direct-url:latest,GOOGLE_CLIENT_SECRET=dataroom-google-client-secret:latest,SESSION_SECRET=dataroom-session-secret:latest,STORAGE_ACCESS_KEY_ID=dataroom-storage-access-key-id:latest,STORAGE_SECRET_ACCESS_KEY=dataroom-storage-secret-access-key:latest"
+
+          url="$(gcloud run services describe "${SERVICE}" \
+            --project="${PROJECT_ID}" --region="${REGION}" --format='value(status.url)')"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Cloud Run URL: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      # The API is behind the Vercel rewrite for the browser, but the run.app URL stays
+      # publicly reachable, so this is a real check that the revision serves traffic —
+      # not merely that gcloud reported success.
+      - name: Smoke-test the revision
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 30 \
+            "${{ steps.deployed.outputs.url }}/api/health"

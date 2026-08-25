@@ -95,21 +95,21 @@ the Cloud Run URL to rewrite to, and both the OAuth origin and the bucket CORS e
 the Vercel URL. Steps marked *(owner)* are run by a human in a browser; everything else is
 assistant work.
 
-- [ ] `scripts/gcloud-bootstrap.sh` — enable APIs, create the Secret Manager secrets,
+- [x] `scripts/gcloud-bootstrap.sh` — enable APIs, create the Secret Manager secrets,
       the deploying service account, the identity pool and its provider. The attribute
       condition pins the **numeric** `repository_id` and `repository_owner_id` plus
       `ref == 'refs/heads/main'`; the numeric ids are deliberate, since a released
       repository *name* can be claimed by someone else and this repository is public
 - [ ] *(owner)* Run the bootstrap script once in Cloud Shell, where gcloud is already
       installed and already authenticated
-- [ ] Multi-stage `Dockerfile` for the API using `pnpm deploy --filter`, plus an
+- [x] Multi-stage `Dockerfile` for the API using `pnpm deploy --filter`, plus an
       entrypoint that runs `prisma migrate deploy` with bounded retries and exponential
       backoff before `exec`-ing the server. A deploy is the only migration mechanism —
       there is no separate manual migration step against Neon
-- [ ] Validate the image locally: `docker build` and `docker run` against the compose
+- [x] Validate the image locally: `docker build` and `docker run` against the compose
       database until the container starts clean. This is what keeps the owner out of the
       loop — every failure reproducible locally is spent here, before the first push
-- [ ] `.github/workflows/ci.yml` (decision #18) and `deploy.yml`. `deploy.yml` triggers on
+- [x] `.github/workflows/ci.yml` (decision #18) and `deploy.yml`. `deploy.yml` triggers on
       `workflow_dispatch` **only**, and grants `id-token: write` in the deploy job alone
 - [ ] *(owner)* Push `main`. Then: trigger with `gh workflow run`, read `gh run view --log`,
       fix, repeat. A re-trigger needs no further push when the cause is configuration

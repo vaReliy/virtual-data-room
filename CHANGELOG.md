@@ -40,6 +40,57 @@ otherwise see.
   arrives, cutting first-contentful-paint from 2304 ms to 1268 ms on a throttled Slow 4G
   connection against the production build.
 
+### Added — Phase 1, ship (deploy mechanism; not yet deployed)
+
+- **`scripts/gcloud-bootstrap.sh`.** One-time, idempotent Google Cloud setup, run by the
+  owner in Cloud Shell: APIs, an Artifact Registry repository, six Secret Manager secrets,
+  a runtime and a deploying service account, and a Workload Identity pool and provider.
+- **`apps/api/Dockerfile` and `docker-entrypoint.sh`.** Multi-stage build ending in
+  `pnpm deploy --prod`, with an entrypoint that applies migrations with bounded
+  exponential backoff before `exec`-ing the server. Validated locally against the compose
+  database before any push.
+- **`.github/workflows/ci.yml`.** Typecheck, lint and test on pull requests and pushes to
+  `main` (decision #18).
+- **`.github/workflows/deploy.yml`.** Builds, pushes and deploys to Cloud Run,
+  authenticating through Workload Identity Federation. `workflow_dispatch` only, with
+  `id-token: write` granted in the deploy job alone (decision #22).
+- **`vercel.json`.** The `/api/*` rewrite to Cloud Run and the SPA fallback (decision #10).
+- **`README.md`.** Setup, local development and where each credential belongs. The project
+  overview, ERD and hosted links are Phase 6's.
+
+### Notes that the diff does not make obvious — ship
+
+- **`prisma` is a runtime dependency now, not a dev one.** The entrypoint runs
+  `prisma migrate deploy`, and `pnpm deploy --prod` strips devDependencies — so leaving it
+  in `devDependencies` produces an image that builds cleanly and then fails to start.
+- **The build stage sets a fake `DIRECT_URL`.** `prisma.config.ts` resolves it when the
+  config file is _loaded_, so even `prisma generate` — which never opens a connection —
+  fails without it. There is no database at build time and there must not be one.
+- **`openssl` is installed in both stages.** The slim Node image ships libssl3 but not the
+  binary Prisma probes for, so Prisma silently selects its openssl-1.1.x engine. The
+  failure surfaces at the first migration as an engine error, not as a missing package.
+- **`pnpm deploy` needs `--legacy`.** Since pnpm 10 the default implementation refuses a
+  workspace that is not `injectWorkspacePackages=true`; opting into that would change how
+  every workspace dependency resolves, dev included, to satisfy one build step.
+- **`tini` is PID 1 on purpose.** The kernel delivers no signal to PID 1 unless the
+  process installed a handler, and Node installs none for SIGTERM — without tini every
+  Cloud Run revision would wait out the full 10s grace period before SIGKILL.
+- **The image tag is the commit SHA, never `latest`.** A Cloud Run revision then names the
+  exact commit it runs, and a rollback is a redeploy of a known tag.
+- **There are no GitHub secrets.** `deploy.yml` reads repository _variables_ only; every
+  secret is a Secret Manager reference resolved by Cloud Run at start-up, so no secret
+  value passes through the workflow, the runner or a log.
+- **`GOOGLE_CALLBACK_URL` is derived, not configured.** The workflow builds it from
+  `APP_URL`. It must match the OAuth client's redirect URI exactly, and three places that
+  can disagree is worse than two.
+- **The Workload Identity condition pins NUMERIC ids.** `repository_id` and
+  `repository_owner_id`, plus `ref == 'refs/heads/main'`. A repository _name_ is released
+  when the repository is deleted and can be claimed by someone else; this repository is
+  public.
+- **`vercel.json` still carries a placeholder destination.** The Cloud Run URL does not
+  exist until the first deploy. Replace it before connecting the Vercel project, or the
+  SPA deploys successfully and every API call 404s.
+
 ### Notes that the diff does not make obvious
 
 - **The five raw SQL statements live in the migration, not in `schema.prisma`.** Prisma
