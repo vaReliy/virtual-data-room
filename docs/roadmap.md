@@ -117,7 +117,7 @@ assistant work.
       from Secret Manager
 - [x] `vercel.json` with the `/api/*` rewrite to the Cloud Run URL
 - [x] *(owner)* Connect the repository to Vercel, building `apps/web`
-- [ ] *(owner)* Add the Vercel origin and the callback redirect URI to the OAuth client,
+- [x] *(owner)* Add the Vercel origin and the callback redirect URI to the OAuth client,
       add the Vercel origin to bucket CORS, and publish the consent screen to
       *In production*
 - [x] Re-run the deploy so Cloud Run receives the Vercel origin in its environment — the

@@ -75,6 +75,16 @@ Data Room served from Neon.
   app's home page as far as the OAuth configuration is concerned, and Google requires the
   home page to link to the privacy policy.
 
+- **Bucket CORS is console-only state.** `scripts/gcloud-bootstrap.sh` does not set it and
+  the repository holds no `cors.json`, so the configuration on `vdr-test-task-docs` exists
+  nowhere but the console: one entry with origins `http://localhost:5173` and
+  `https://virtual-data-room-gamma.vercel.app`, methods `GET`, `PUT` and `HEAD`, response headers
+  `Content-Type` and `ETag`, max age 3600. Nothing will overwrite it — and nothing will
+  restore it either if the bucket is ever recreated. `ETag` is in the list so the browser
+  may read it back after a signed `PUT`; without it the S3 client sees a successful upload
+  and an `undefined` ETag. Bucket CORS applies because uploads go through the
+  S3-compatible XML endpoint; the JSON API ignores it entirely.
+
 Why this was needed: the `Publish app` button on **Audience** stays disabled while the
 **Branding** page's *App domain* section is empty. Those three links are documented as
 required for every External app in production, and the console names none of them — the
@@ -82,6 +92,11 @@ banner only says the configuration is incomplete. The earlier suspicion that `ve
 was the blocker is wrong: `vercel.app` is on the Public Suffix List, so
 `virtual-data-room-gamma.vercel.app` *is* a top private domain and the console accepts it
 as an Authorized domain.
+
+Publication was verified behaviourally, not by reading the console: an account with no
+role on the project and no entry in the test-user list signed in successfully. A project
+owner signing in proves nothing — the console admits owners while the app is still in
+Testing.
 
 Carry this forward by hand: **do not upload an app logo and do not start brand
 verification.** The app uses only non-sensitive scopes (`openid`, `userinfo.email`,
