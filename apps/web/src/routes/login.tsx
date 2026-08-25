@@ -1,4 +1,4 @@
-import { Navigate, useSearchParams } from 'react-router';
+import { Link, Navigate, useSearchParams } from 'react-router';
 import { AlertTriangle, ShieldCheck } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -66,6 +66,19 @@ export function LoginRoute() {
             </p>
           </CardContent>
         </Card>
+
+        {/* Google's OAuth configuration registers these two pages, and requires the app's
+            home page to link to the privacy policy. An anonymous visitor lands here, so
+            this is that home page. */}
+        <p className="text-center text-xs text-muted-foreground">
+          <Link className="underline underline-offset-4 hover:text-foreground" to="/privacy">
+            Privacy Policy
+          </Link>
+          <span className="px-2">·</span>
+          <Link className="underline underline-offset-4 hover:text-foreground" to="/terms">
+            Terms of Service
+          </Link>
+        </p>
       </div>
     </div>
   );

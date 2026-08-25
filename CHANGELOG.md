@@ -64,6 +64,36 @@ Data Room served from Neon.
 - SPA — https://virtual-data-room-gamma.vercel.app
 - API — https://dataroom-api-naortdwt2q-ey.a.run.app
 
+### Added — Phase 1, consent screen prerequisites
+
+- **`/privacy` and `/terms`.** Two public routes and a `features/legal` layout, registered
+  on the Google Auth Platform Branding page as the app's privacy policy and terms of
+  service links. They sit outside `SessionGate`: Google requires them to resolve for a
+  signed-out visitor, and a redirect to `/login` would not qualify.
+- **Legal links on the login screen.** `/` is behind `SessionGate`, so an anonymous
+  visitor — the Google reviewer included — lands on `/login`. That screen is therefore the
+  app's home page as far as the OAuth configuration is concerned, and Google requires the
+  home page to link to the privacy policy.
+
+Why this was needed: the `Publish app` button on **Audience** stays disabled while the
+**Branding** page's *App domain* section is empty. Those three links are documented as
+required for every External app in production, and the console names none of them — the
+banner only says the configuration is incomplete. The earlier suspicion that `vercel.app`
+was the blocker is wrong: `vercel.app` is on the Public Suffix List, so
+`virtual-data-room-gamma.vercel.app` *is* a top private domain and the console accepts it
+as an Authorized domain.
+
+Carry this forward by hand: **do not upload an app logo and do not start brand
+verification.** The app uses only non-sensitive scopes (`openid`, `userinfo.email`,
+`userinfo.profile`), so verification is not required — but a logo on an External
+production app triggers it, and verification demands a Search Console *Domain property*
+(DNS-level) proof, which is impossible for a `vercel.app` subdomain. That path ends in a
+state no amount of console work can leave.
+
+The privacy policy describes exactly what `User`, `Account` and `Node` persist, and states
+that no Google access or refresh tokens are stored. That is a property of the auth module,
+not a marketing line — if it changes, the page changes with it.
+
 ### Notes that the diff does not make obvious — ship
 
 - **`prisma` is a runtime dependency now, not a dev one.** The entrypoint runs
