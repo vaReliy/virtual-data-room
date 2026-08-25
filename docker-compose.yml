@@ -87,16 +87,17 @@ services:
       minio:
         condition: service_healthy
 
-  # apps/web does not exist until the Web session lands, so this service is opt-in
-  # (`docker compose --profile web up`) and `docker compose up` stays green until then.
-  # Removing the `profiles` key is that session's first task.
   web:
-    profiles: ['web']
     image: node:22-bookworm-slim
     working_dir: /workspace
     command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @dr/web dev --host"
     environment:
       VITE_PORT: '5173'
+      # Inside compose the API is a sibling container, so the dev server cannot proxy to
+      # localhost — that is the web container's own loopback. On a bare-metal `pnpm dev`
+      # the variable is absent and vite.config.ts falls back to localhost:3000. Either
+      # way the browser still sees a single origin, which is the point of the proxy.
+      API_PROXY_TARGET: http://api:3000
     ports:
       - '5173:5173'
     volumes:

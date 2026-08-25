@@ -3,6 +3,7 @@ import eslint from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import prettier from 'eslint-config-prettier';
 import globals from 'globals';
+import reactHooks from 'eslint-plugin-react-hooks';
 
 /**
  * The two boundary rules below are not style. They are the compile-time half of
@@ -37,7 +38,6 @@ export default tseslint.config(
       '**/coverage/**',
       '**/node_modules/**',
       'apps/api/src/generated/**',
-      'apps/web/**',
     ],
   },
 
@@ -73,6 +73,16 @@ export default tseslint.config(
   {
     files: ['**/node.repository.ts'],
     rules: { 'no-restricted-syntax': 'off' },
+  },
+
+  // The SPA runs in a browser, not in Node, and its correctness rules are different:
+  // the hooks rules catch a class of bug — conditional hooks, stale closures in
+  // dependency arrays — that TypeScript cannot see.
+  {
+    files: ['apps/web/**/*.{ts,tsx}'],
+    languageOptions: { globals: { ...globals.browser } },
+    plugins: { 'react-hooks': reactHooks },
+    rules: { ...reactHooks.configs.recommended.rules },
   },
 
   {

@@ -24,6 +24,22 @@ otherwise see.
 /api/me`, and a Data Room provisioned automatically on first sign-in.
 - **Local stack.** `docker-compose.yml` running `postgres:17` and MinIO.
 
+### Added — Phase 1, web skeleton
+
+- **`apps/web`.** Vite + React + TypeScript SPA with Tailwind v4 and shadcn/ui
+  (`radix-nova`, self-hosted Geist). The dev server proxies `/api` so the browser sees a
+  single origin locally exactly as it will through the Vercel rewrite.
+- **Screens.** Login, the authenticated shell, and the empty Data Room — each with its
+  loading, empty and error states. Room aggregates are read from `GET /api/me`.
+- **Session.** TanStack Query owns the session; a 401 routes to the login screen rather
+  than rendering an error, and is never retried.
+- **Lint.** `apps/web` is no longer excluded from ESLint; `eslint-plugin-react-hooks`
+  covers the rules TypeScript cannot see.
+- **Local stack.** The compose `web` service is enabled (its `profiles` gate is gone).
+- **Boot skeleton.** `index.html` paints an inline app-shell skeleton before the bundle
+  arrives, cutting first-contentful-paint from 2304 ms to 1268 ms on a throttled Slow 4G
+  connection against the production build.
+
 ### Notes that the diff does not make obvious
 
 - **The five raw SQL statements live in the migration, not in `schema.prisma`.** Prisma
@@ -40,6 +56,27 @@ otherwise see.
 - **`PrismaService` is not exported from `PersistenceModule`.** Repositories are
   registered there and exported individually, so what may reach the database is an
   explicit list rather than a convention.
+- **The web dev server needs `optimizeDeps.include: ['@dr/contracts']`.** That package
+  emits CommonJS and a linked workspace dependency is not pre-bundled, so without this
+  the dev server serves it as raw ESM and every named import from it fails. `vite build`
+  is unaffected — a green build is not evidence the dev server starts.
+- **`shadcn` is a runtime dependency on purpose.** `src/index.css` imports
+  `shadcn/tailwind.css`, so moving it to `devDependencies` breaks the production build,
+  where dev dependencies are stripped, while the local build keeps working.
+- **502/503/504 are not part of the error contract.** They come from the proxy in front
+  of the API — Vite locally, the Vercel rewrite in production — and are rendered as
+  "cannot reach the server" rather than as the literal gateway status.
+- **The compose `web` service proxies to `http://api:3000`, not to localhost.** Inside a
+  container localhost is that container. `API_PROXY_TARGET` carries this; a bare-metal
+  `pnpm dev` falls back to `localhost:3000`.
+- **The boot skeleton in `index.html` duplicates `AppShellSkeleton`'s geometry on
+  purpose.** It must paint from the HTML response alone, so it is styled inline and never
+  with a Tailwind class — a class would arrive with the stylesheet it exists to precede.
+  Change the shell's header height or content width in both files, or it visibly jumps
+  when React mounts.
+- **Measure front-end performance against `vite preview`, never the dev server.** The dev
+  server serves unbundled modules — 100+ requests in a waterfall — so a throttled
+  measurement there reflects Vite, not the product.
 
 ### Toolchain constraints worth knowing before changing them
 

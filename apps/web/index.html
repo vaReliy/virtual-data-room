@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- A Data Room is private by definition; keep it out of search indexes. -->
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Virtual Data Room</title>
+    <!--
+      The boot skeleton below is styled here rather than with Tailwind classes, and its
+      markup is inline rather than rendered. Both are deliberate: it has to be paintable
+      from the HTML response alone, before the stylesheet or the bundle arrive. A class
+      from the external stylesheet would defeat the purpose, and so would a second
+      request.
+
+      It mirrors the geometry of `AppShellSkeleton` so the handover is invisible: this
+      paints first, React replaces it with the real skeleton on mount, and the two look
+      identical. Keep them in step — a change to the shell header height or the content
+      width belongs in both places.
+    -->
+    <style>
+      @keyframes dr-pulse {
+        50% {
+          opacity: 0.4;
+        }
+      }
+      .dr-boot {
+        display: flex;
+        height: 100%;
+        flex-direction: column;
+        background: #fff;
+        font-family: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+      }
+      .dr-boot__header {
+        display: flex;
+        height: 56px;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        border-bottom: 1px solid #ebebeb;
+        padding: 0 24px;
+      }
+      .dr-boot__brand {
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: #0a0a0a;
+      }
+      .dr-boot__actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .dr-boot__main {
+        flex: 1;
+        padding: 32px 24px;
+      }
+      .dr-boot__content {
+        margin: 0 auto;
+        display: flex;
+        width: 100%;
+        max-width: 896px;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .dr-boot__bar {
+        border-radius: 6px;
+        background: #f4f4f5;
+        animation: dr-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+      @media (max-width: 640px) {
+        .dr-boot__header,
+        .dr-boot__main {
+          padding-left: 16px;
+          padding-right: 16px;
+        }
+        .dr-boot__name {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body class="h-full">
+    <div id="root" class="h-full">
+      <!-- Replaced by React on mount. See the note above. -->
+      <div class="dr-boot">
+        <div class="dr-boot__header">
+          <span class="dr-boot__brand">Virtual Data Room</span>
+          <div class="dr-boot__actions">
+            <div class="dr-boot__bar dr-boot__name" style="height: 16px; width: 128px"></div>
+            <div
+              class="dr-boot__bar"
+              style="height: 32px; width: 32px; border-radius: 9999px"
+            ></div>
+            <div class="dr-boot__bar" style="height: 28px; width: 80px"></div>
+          </div>
+        </div>
+        <div class="dr-boot__main">
+          <div class="dr-boot__content">
+            <div class="dr-boot__bar" style="height: 28px; width: 224px"></div>
+            <div class="dr-boot__bar" style="height: 16px; width: 288px"></div>
+            <div class="dr-boot__bar" style="height: 192px; width: 100%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <noscript>
+      <p style="font-family: system-ui, sans-serif; padding: 24px">
+        This application needs JavaScript enabled.
+      </p>
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -74,8 +74,8 @@ already shows.
 - [x] Auto-provision a Data Room on first login
 
 ### Web
-- [ ] Vite + React + TS + Tailwind + shadcn init; `server.proxy` → `/api`
-- [ ] Login screen, authenticated shell, empty-room state
+- [x] Vite + React + TS + Tailwind + shadcn init; `server.proxy` → `/api`
+- [x] Login screen, authenticated shell, empty-room state
 
 ### Local
 

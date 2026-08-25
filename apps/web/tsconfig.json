@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Browser target, so the Node libs the API relies on are deliberately absent.
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    // Vite does the bundling, so TypeScript only type-checks. `preserve` leaves the
+    // import syntax alone and implies bundler-style resolution.
+    "module": "preserve",
+    // The base config is nodenext for the API; the browser build resolves like a bundler.
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    // TS 6 no longer infers rootDir from `include` the way TS 5 did; every tsconfig in
+    // this repo states it (see notes on the TypeScript pin).
+    "rootDir": ".",
+    "types": ["vite/client", "node"],
+    // Mirrors the `@` alias in vite.config.ts. shadcn/ui generates imports in this form.
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["src", "vite.config.ts"]
+}
