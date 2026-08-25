@@ -9,6 +9,66 @@ otherwise see.
 
 ## [Unreleased]
 
+### Added — Phase 2, node backend
+
+- **`AccessScope`.** A branded boundary produced only by `AccessControlService`. The brand
+  is a `unique symbol` that is not exported, so no service can write an object literal
+  that satisfies the type — the enforcement is the type, not a convention.
+- **`NodeRepository`.** The tree, and the only file allowed to run raw SQL. Every method
+  takes an `AccessScope` first and bounds its query by `path LIKE rootPath || '%'` **in
+  SQL**, never in TypeScript.
+- **Node endpoints.** `GET /api/rooms/:roomId/nodes/:nodeId?`, `POST`, `PATCH /:nodeId`,
+  `DELETE /:nodeId` — browse, create folder, rename, delete subtree.
+- **Contract reshape (decision #24).** The browse response carries
+  `{ room?, node, breadcrumbs, children, nextCursor, role }`, and `GET /api/me` narrows to
+  `{ user, dataRooms: [{ id, name }] }`. Room aggregates no longer travel with the session.
+- **`nodeNameSchema`.** One schema in `packages/contracts` for both request bodies and,
+  from the next session, both dialog resolvers.
+- **`ZodValidationPipe`.** Bodies are validated against the contracts schemas and rejected
+  with `422`. Nest's `ValidationPipe` is not used anywhere in this API.
+- **Integration harness.** Vitest against a real Postgres, with three tests: the subtree
+  delete over an already-deleted subtree, `23505` → `409` on rename, and keyset paging.
+  CI now runs a `postgres:17` service container for them.
+
+### Notes that the diff does not make obvious — Phase 2 backend
+
+- **`findInScope` has no safe twin, and that is the design.** It always returns
+  soft-deleted rows. Adding a `findById` that filters `deleted_at` would let a call site
+  turn a `410` into a `404` — a deleted document reported as one that never existed. Every
+  caller goes through `NodeService.resolveLiveNode`, whose return type has no `deletedAt`
+  field at all, so `if (!node) throw 404` cannot compile into serving a deleted node.
+- **The subtree delete is the single writer of `deleted_at` on `nodes`.** "A node under a
+  deleted ancestor is itself deleted" is an assumption the `410` design rests on, not a
+  constraint the database enforces. A second writer — a restore cascade, a hand-run
+  `UPDATE` while debugging — breaks it silently, leaving live rows under a deleted
+  ancestor that are missing from listings and still readable by direct id.
+- **`AND deleted_at IS NULL` in that delete is load-bearing.** Without it a second delete
+  re-stamps already-deleted rows and charges the ancestors for them twice. Nothing throws;
+  the delete-warning dialog simply shows a wrong number. The integration test was verified
+  by removing the predicate — the delta goes from `-2` to `-4`.
+- **The listing carries the database's own `lower(name)`.** The cursor must hold the value
+  Postgres computed for the `ORDER BY`, not a JavaScript `toLowerCase()` of the name:
+  JS case folding is locale-invariant while `lower()` follows the collation, and where
+  they disagree a row is dropped or repeated at a page boundary.
+- **`applyAggregateDelta` updates `DataRoom` too, in the same transaction.** A root-level
+  node has no ancestors, so the ancestor `updateMany` would update nothing at all. It is
+  also the one repository method deliberately *not* clipped to `rootPath`: counters above
+  a share root still have to be right. Both facts are in `architecture.md`'s new
+  scope-exception inventory, which is where the next such method must be recorded.
+- **`23505` is caught in two spellings.** The uniqueness index is created in raw SQL, not
+  declared in the Prisma schema, so Prisma's `P2002` cannot be assumed; the driver's raw
+  SQLSTATE is matched as well, following the error through `cause`.
+- **The integration tests use their own database.** `TEST_DATABASE_URL`, defaulting to
+  `…/dataroom_test`, because the harness empties every table between tests — pointing it
+  at the compose database would wipe the local sign-in on every run. `prisma migrate
+  deploy` creates it on first use, so there is no setup step. It is read from the real
+  environment, **not** from `.env`: Vitest does not load that file, so overriding the
+  default means exporting the variable (which is what `ci.yml` does).
+- **`apps/web/src/routes/rooms.$roomId.tsx` is a placeholder between two shapes.** It lost
+  the aggregates it used to render from `/api/me` and gained nothing back: the node browser
+  that reads them from the browse endpoint lands in the next session, along with the
+  removal of its `dataRooms.find` ownership gate.
+
 ### Added — Phase 1, backend skeleton
 
 - **Workspace.** pnpm workspaces with `apps/api` and `packages/contracts`. Every

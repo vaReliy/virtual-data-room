@@ -1,4 +1,7 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["**/*.test.ts"]
+  // Neither the tests nor the harness that feeds them belongs in the production image.
+  // `src/test-support` is not named `*.test.ts` and would otherwise be compiled into
+  // dist/ — along with an import of the Prisma CLI path it uses to migrate.
+  "exclude": ["**/*.test.ts", "src/test-support/**"]
 }

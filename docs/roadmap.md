@@ -160,26 +160,26 @@ already shows.
 scope-exception inventory, written down as the repository is built; the subtree delete
 excluding already-deleted rows; and `23505` mapping to `409` on create and rename.
 
-- [ ] `AccessScope` branded type + `AccessControlService.resolveForUser`
-- [ ] **Write guard: every node mutation asserts `scope.role === 'OWNER'` first**, and
+- [x] `AccessScope` branded type + `AccessControlService.resolveForUser`
+- [x] **Write guard: every node mutation asserts `scope.role === 'OWNER'` first**, and
       fails with `404`, not `403`, like everything else here. In the service, as the
       first line — not a Nest guard, which would need `AccessScope` in ambient request
       state that `architecture.md` deliberately refuses. Hiding buttons behind `role` is
       not access control; `curl` does not read the UI (decision #25)
-- [ ] `NodeRepository`, scope-bounded methods; `path` maintenance on create. **The node's
+- [x] `NodeRepository`, scope-bounded methods; `path` maintenance on create. **The node's
       UUID is generated in application code** (`crypto.randomUUID()`) before the insert:
       `path` contains the node's own id and is `NOT NULL`, so a database-generated
       `@default(uuid())` would not be known in time to build it
-- [ ] `findInScope(scope, id)` — the **only** way to read a node by id, and it always
+- [x] `findInScope(scope, id)` — the **only** way to read a node by id, and it always
       returns soft-deleted rows. No safe twin exists, so no call site can pick the wrong
       door and turn a `410` into a `404`
-- [ ] `resolveLiveNode(scope, id)` in the service — the single place that runs the order
+- [x] `resolveLiveNode(scope, id)` in the service — the single place that runs the order
       of checks: no row → `NotFoundException`, `deletedAt` set → `GoneException`, else a
       narrowed type **without** `deletedAt`. A nullable field in a return type forces
       nobody: a caller writing `if (!node) throw 404` compiles and then serves a deleted
       node with a `200`, which decision #6 calls the worst failure this system has. Every
       caller goes through this helper, so no call site ever sees `deletedAt` at all
-- [ ] Write the scope-exception inventory into `architecture.md` while building it
+- [x] Write the scope-exception inventory into `architecture.md` while building it
 - [ ] Restore `cursor: pointer` on `button` and `[role="button"]` in `index.css`
       `@layer base`. Tailwind v4's Preflight sets `cursor: default` to match the browser,
       which reads as a dead control. Global on purpose — it also covers the Radix
@@ -187,10 +187,10 @@ excluding already-deleted rows; and `23505` mapping to `409` on create and renam
 - [ ] `nodeNameSchema` in `packages/contracts` — trim, 1–255, rejected characters — wired
       into both request bodies and both dialog resolvers (`architecture.md` § Node
       endpoints)
-- [ ] Create folder, nested folders, per `architecture.md` § Node endpoints: `POST`,
+- [x] Create folder, nested folders, per `architecture.md` § Node endpoints: `POST`,
       `201`, `{ parentId, name }`, `23505` → `409` with no suffix. Catch the raw `23505`
       as well as `P2002` — the index is raw SQL, not declared in the Prisma schema
-- [ ] Reshape the browser contract per decision #24: `{ room?, node, breadcrumbs,
+- [x] Reshape the browser contract per decision #24: `{ room?, node, breadcrumbs,
       children, nextCursor }`, `node: null` at the root, `room` only when
       `scope.rootNodeId === null`, plus `role` off the `AccessScope`. Narrow
       `meResponseSchema` to `{ id, name }` per room and drop the aggregates the shell
@@ -217,21 +217,21 @@ excluding already-deleted rows; and `23505` mapping to `409` on create and renam
       (`rootNodeId === null`) lands on that route, so leaving it locks the recipient out
       one door over. While there: `home.tsx:19` and the `me.ts` docstring still promise
       the create-room affordance of #21, superseded by #23
-- [ ] Breadcrumbs: `findAncestorsInScope(scope, ids)` — `path` carries UUIDs only, so the
+- [x] Breadcrumbs: `findAncestorsInScope(scope, ids)` — `path` carries UUIDs only, so the
       names need a second, multi-id read. Scope-bounded and live-only, and it goes in the
       scope-exception inventory alongside `findInScope`. The result is ordered by `path`,
       not by whatever order the rows come back in
 - [ ] Rename folder (`409` + inline dialog)
-- [ ] Delete subtree: one `UPDATE ... WHERE path LIKE ... AND deleted_at IS NULL`,
+- [x] Delete subtree: one `UPDATE ... WHERE path LIKE ... AND deleted_at IS NULL`,
       delta from `RETURNING type, size`. The `UPDATE` and the ancestor delta are **one
       transaction** — a delta applied outside it can be lost against a stamp that was not
 - [ ] Delete warning showing real subtree counts
-- [ ] `applyAggregateDelta` helper — **four** call sites: create and delete here,
+- [x] `applyAggregateDelta` helper — **four** call sites: create and delete here,
       upload-complete and move in Phase 3. Restore is out of scope (decision #6 ships no
       trash UI), so it is not one of them and never will be
-- [ ] **Integration harness** against the compose Postgres — migrations, per-test cleanup,
+- [x] **Integration harness** against the compose Postgres — migrations, per-test cleanup,
       Vitest config. Paid once here; it makes the two Phase 3 tests nearly free
-- [ ] **Two integration tests, here rather than in Phase 4** (decision #26), because they
+- [x] **Two integration tests, here rather than in Phase 4** (decision #26), because they
       exercise this phase's raw SQL and a mocked repository cannot reach it:
       - subtree delete over a subtree already containing a deleted row, asserting the
         `RETURNING` delta. This is the quiet one: without the `deleted_at IS NULL` filter

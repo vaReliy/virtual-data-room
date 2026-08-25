@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { DataRoomSummary } from '@dr/contracts';
+import type { DataRoomIdentity } from '@dr/contracts';
 
 import { DataRoomRepository } from './data-room.repository';
 
@@ -18,7 +18,7 @@ export class DataRoomService {
    * Idempotent by design: it provisions only when the user owns nothing, so signing in
    * again never adds a second room.
    */
-  async ensureProvisioned(ownerId: string): Promise<DataRoomSummary[]> {
+  async ensureProvisioned(ownerId: string): Promise<DataRoomIdentity[]> {
     const existing = await this.dataRooms.listOwnedBy(ownerId);
     if (existing.length > 0) return existing;
 
@@ -26,7 +26,7 @@ export class DataRoomService {
     return [created];
   }
 
-  async listOwnedBy(ownerId: string): Promise<DataRoomSummary[]> {
+  async listOwnedBy(ownerId: string): Promise<DataRoomIdentity[]> {
     return this.dataRooms.listOwnedBy(ownerId);
   }
 }

@@ -127,6 +127,30 @@ It must be raw SQL: the extension overwrites any caller-supplied `deletedAt` (de
 The listing of a folder's children is unaffected and goes through the extension normally:
 deleted children simply are not there.
 
+### Scope-exception inventory
+
+Every repository method takes an `AccessScope` first and bounds its query by
+`path LIKE scope.rootPath || '%'`. The methods below deviate from that sentence in some
+way, and each deviation is listed here rather than discovered later in a diff. Anything
+not on this list and not matching the sentence is a security decision, not an
+implementation detail — stop and ask.
+
+| Method | How it deviates | What still bounds it |
+|---|---|---|
+| `NodeRepository.findInScope` | Returns soft-deleted rows: no `deleted_at IS NULL`. Raw SQL. | `id`, `data_room_id`, and `path LIKE rootPath` — the full scope boundary. The bypass is the deletion filter only. |
+| `NodeRepository.findAncestorsInScope` | Multi-id read (`id IN (…)`) rather than a single node. Raw SQL. | `data_room_id`, `path LIKE rootPath`, and `deleted_at IS NULL`. Ids come from the caller's own clipped `path`, never from a request. |
+| `NodeRepository.listChildrenInScope` | Keyed on `COALESCE(parent_id, data_room_id)`, which Prisma cannot express. Raw SQL. | `data_room_id`, `path LIKE rootPath`, `deleted_at IS NULL`. |
+| `NodeRepository.deleteSubtree` | Writes a whole `path` range in one statement. Raw SQL. | `data_room_id`, the node's own `path` prefix, `path LIKE rootPath`, and `deleted_at IS NULL` — the last being what keeps a second delete from charging the same rows twice. |
+| `NodeRepository.applyAggregateDelta` | Takes a scope but is deliberately **not** clipped to `rootPath`. | `data_room_id`, plus an id list taken from the node's own `path`. An ancestor above a share root still has to hold correct counters; clipping here would silently stop maintaining them. It writes counters only — never `name`, `path`, `parent_id` or `deleted_at`. |
+| `DataRoomRepository.findInScope` | Bounded by `scope.dataRoomId`, with no path predicate. | A Data Room is the scoping boundary itself; there is no ancestry to clip. Whether the room may be *shown* is the caller's decision, and `NodeService` makes it only when `scope.rootNodeId === null`. |
+| `DataRoomRepository` — `listOwnedBy`, `countOwnedBy`, `create`, `findOwnedById` | Take no `AccessScope`. | `ownerId`. These run *before* a scope exists: `findOwnedById` is what `AccessControlService` uses to produce one. |
+| `UserRepository` | Takes no `AccessScope`. | Identity. There is no tree to bound, and the caller is by definition the row's subject. |
+
+One more is already known and deliberately absent, because it would have no caller yet:
+the `dataRoomId`-bounded node lookup that resolves a grant from a target node's ancestors
+takes **no** `AccessScope` at all — it runs before one exists. It arrives in Phase 4 with
+sharing, and owner resolution never reads a node.
+
 ## Upload flow
 
 Three steps, because bytes go straight to storage (Vercel's 4.5 MB body limit and

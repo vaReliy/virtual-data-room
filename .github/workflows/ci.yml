@@ -20,16 +20,36 @@ jobs:
   checks:
     runs-on: ubuntu-latest
 
+    # The integration tests need a real Postgres — the raw SQL they cover bypasses the
+    # soft-delete extension and cannot be mocked (decision #26). Debian-based, matching
+    # docker-compose.yml and Neon: musl collations sort differently from glibc, and every
+    # listing is ordered and keyset-paginated on lower(name).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: dataroom
+          POSTGRES_PASSWORD: dataroom
+          POSTGRES_DB: dataroom
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dataroom -d dataroom"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
     # `prisma.config.ts` resolves env('DIRECT_URL') when the config file is LOADED, so
     # every Prisma CLI invocation needs it set — including `prisma generate`, which runs
     # as @dr/api's postinstall, reads only the schema and never opens a connection.
     # Locally the variable comes from `.env`; there is none here, and there must not be.
     #
-    # This placeholder is never dialled. Nothing in this workflow touches a database:
-    # decision #16 puts integration tests at the end of Phase 4, and when they arrive they
-    # bring a service container with a real connection string of their own.
+    # TEST_DATABASE_URL is the one the harness actually dials. It names a database of its
+    # own rather than the one above: the harness empties every table between tests, and
+    # `prisma migrate deploy` creates it on first use.
     env:
-      DIRECT_URL: postgresql://ci:ci@127.0.0.1:5432/ci
+      DIRECT_URL: postgresql://dataroom:dataroom@127.0.0.1:5432/dataroom
+      TEST_DATABASE_URL: postgresql://dataroom:dataroom@127.0.0.1:5432/dataroom_test
 
     steps:
       - uses: actions/checkout@v5

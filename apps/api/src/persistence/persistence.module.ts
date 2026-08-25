@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { UserRepository } from '../modules/auth/user.repository';
 import { DataRoomRepository } from '../modules/data-room/data-room.repository';
+import { NodeRepository } from '../modules/node/node.repository';
 import { PrismaService } from './prisma.service';
 
 /**
@@ -16,7 +17,7 @@ import { PrismaService } from './prisma.service';
  * boundary allows `*.repository.ts` and this directory, and nothing else.
  */
 @Module({
-  providers: [PrismaService, UserRepository, DataRoomRepository],
-  exports: [UserRepository, DataRoomRepository],
+  providers: [PrismaService, UserRepository, DataRoomRepository, NodeRepository],
+  exports: [UserRepository, DataRoomRepository, NodeRepository],
 })
 export class PersistenceModule {}

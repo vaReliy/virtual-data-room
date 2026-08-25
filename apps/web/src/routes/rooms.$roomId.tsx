@@ -1,20 +1,25 @@
 import { useParams } from 'react-router';
-import { FolderOpen, Inbox } from 'lucide-react';
+import { FolderOpen } from 'lucide-react';
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardTitle } from '@/components/ui/card';
 import { ErrorState } from '@/features/session/error-state';
 import { useSessionContext } from '@/features/session/session-gate';
 import { ApiError } from '@/lib/api-client';
-import { formatBytes, pluralize } from '@/lib/formatters';
 
 /**
- * The Data Room browser shell. Its aggregates come straight from `GET /api/me`: they are
- * denormalized counters maintained on every mutation (decision #5), so the whole subtree
- * summary costs no extra query however large the room grows.
+ * A placeholder standing between two shapes, and deliberately not a screen worth
+ * investing in.
  *
- * The contents region is intentionally the empty state only. Nothing in this phase can
- * put a node in a room, and the listing endpoint arrives in Phase 2 — which replaces
- * this region with the node browser rather than adding to it.
+ * The aggregates it used to render came from `GET /api/me`, which no longer carries them:
+ * from Phase 2 every folder mutation changes them, so they travel with the thing being
+ * viewed instead (decision #24). The counts now arrive from
+ * `GET /api/rooms/:roomId/nodes`, which the node browser calls — and that browser, the
+ * route it lives on, and the removal of the ownership gate below all land together in the
+ * next session. Wiring half of it here would mean writing this screen twice.
+ *
+ * Two things go when it is replaced: the `dataRooms.find` gate — a room reached through a
+ * `USER` share is not a room the caller *owns*, so deriving existence from `/api/me` locks
+ * a valid grantee out before the API is ever asked — and this card.
  */
 export function RoomRoute() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -32,58 +37,22 @@ export function RoomRoute() {
     );
   }
 
-  const isEmpty = room.fileCount === 0 && room.folderCount === 0;
-
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h1 className="text-xl font-semibold tracking-tight">{room.name}</h1>
-        <p className="text-sm text-muted-foreground">
-          {pluralize(room.folderCount, 'folder')} · {pluralize(room.fileCount, 'file')} ·{' '}
-          {formatBytes(room.totalSize)}
-        </p>
-      </div>
+      <h1 className="text-xl font-semibold tracking-tight">{room.name}</h1>
 
-      {isEmpty ? (
-        <EmptyRoom />
-      ) : (
-        <RoomSummary fileCount={room.fileCount} folderCount={room.folderCount} />
-      )}
+      <Card className="border-dashed">
+        <CardContent className="flex flex-col items-center gap-3 py-14 text-center">
+          <div className="flex size-11 items-center justify-center rounded-full bg-muted">
+            <FolderOpen className="size-5 text-muted-foreground" />
+          </div>
+          <CardTitle className="text-base">Contents are not on screen yet</CardTitle>
+          <CardDescription className="max-w-sm">
+            The API serves this room&rsquo;s folders, their subtree totals and everything above
+            them. The browser that renders them arrives with the next screen.
+          </CardDescription>
+        </CardContent>
+      </Card>
     </div>
-  );
-}
-
-function EmptyRoom() {
-  return (
-    <Card className="border-dashed">
-      <CardContent className="flex flex-col items-center gap-3 py-14 text-center">
-        <div className="flex size-11 items-center justify-center rounded-full bg-muted">
-          <Inbox className="size-5 text-muted-foreground" />
-        </div>
-        <CardTitle className="text-base">This Data Room is empty</CardTitle>
-        <CardDescription className="max-w-sm">
-          Folders and files you add will appear here. Everything stays private until you share it.
-        </CardDescription>
-      </CardContent>
-    </Card>
-  );
-}
-
-/** What the API can currently say about a non-empty room. Phase 2 lists its contents. */
-function RoomSummary({ fileCount, folderCount }: { fileCount: number; folderCount: number }) {
-  return (
-    <Card>
-      <CardHeader>
-        <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-muted">
-          <FolderOpen className="size-5 text-muted-foreground" />
-        </div>
-        <CardTitle className="text-base">
-          {pluralize(folderCount, 'folder')} and {pluralize(fileCount, 'file')}
-        </CardTitle>
-        <CardDescription>
-          Browsing the contents of a Data Room arrives in the next phase.
-        </CardDescription>
-      </CardHeader>
-    </Card>
   );
 }
