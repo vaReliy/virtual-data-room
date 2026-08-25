@@ -250,16 +250,27 @@ scope the two states must stay indistinguishable, exactly as with 404-not-403 ab
 
 `410` is therefore only ever seen by someone who was entitled to see the node alive.
 
-### `410` on both node types, two different screens
+### `410` on both node types, two screens, one way back
 
-The status does not vary by node type; the screen does. Both are dead ends with a way
+The status does not vary by node type; the wording does. Both are dead ends with a way
 back, so nothing moves under the reader:
 
-- **File preview** → "This file was deleted by the owner", with a link to its folder.
-- **Folder browser** → "This folder was deleted by the owner", with a link to the Data
-  Room root. No auto-redirect: the nearest live ancestor cannot be derived, since the
-  subtree delete stamps every ancestor in the same statement, so any bounce would land at
-  the room root anyway.
+- **File preview** → "This file was deleted by the owner", back to the Data Room root.
+- **Folder browser** → "This folder was deleted by the owner", back to the Data Room root.
+
+**Both link to the room root, and the file screen does not link to its folder.** An earlier
+draft of this section promised that it would; it cannot. A `410` carries no body, so on a
+direct load of `/rooms/:roomId/n/:nodeId` the client knows neither that the node was a file
+nor which folder held it — the type is only in hand when the reader arrived by clicking a
+row, and a reload destroys it. Putting `{ type, parentId }` into the `410` body would leak
+nothing (step 2 of the order of checks already established that this caller could see the
+node alive), but it makes a response shape out of an error every later producer would owe,
+including the Phase 4 share `410`s, which have no node to describe at all.
+
+The link would usually be dead anyway: the subtree delete stamps every ancestor in the same
+statement, so a file's parent folder is very likely `410` itself. For the same reason there
+is no auto-redirect — the nearest live ancestor cannot be derived, and any bounce would land
+at the room root, which is what these links offer explicitly instead.
 
 This is the edge case `BRIEF.md` names — a folder deleted while someone else is viewing
 it. Returning `404` for it would be indistinguishable from a mistyped id, leaving the

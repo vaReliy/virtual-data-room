@@ -343,7 +343,11 @@ export class NodeRepository {
    * counters are whole-room totals, and since decision #24 they are what the browser
    * header renders at the room root — a drift there is visible, not latent.
    *
-   * Four call sites in total: create and delete here, upload-complete and move in Phase 3.
+   * Five calls from four call sites: create and delete here, upload-complete and move in
+   * Phase 3 — move calling it **twice**, once negative off the old ancestor chain and once
+   * positive onto the new one. The two room updates net to zero, which is correct: a move
+   * relocates a subtree inside one room and changes no whole-room total.
+   *
    * Restore is not one of them and never will be — decision #6 ships no trash UI.
    *
    * Bounded by `scope.dataRoomId`, and deliberately **not** clipped to `scope.rootPath`:

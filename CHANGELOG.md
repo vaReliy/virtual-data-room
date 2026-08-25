@@ -132,6 +132,44 @@ otherwise see.
   is `SessionGate` → `NoDataRoomState`; it is the one state in this phase verified by
   reading rather than by looking.
 
+### Changed — Phase 2 → 3 forward-compat pass
+
+No behaviour changed. The pass ran against the frozen surfaces at the boundary, which is
+the last moment `docs/` are cheap to edit, and produced one spec correction plus four
+invariants that Phase 2 satisfies by accident.
+
+- **The deleted-*file* `410` no longer promises a link to its folder**
+  (`architecture.md` § `410` on both node types). It cannot: a `410` carries no body, so
+  on a direct load the client knows neither that the node was a file nor which folder held
+  it. The type is only in hand when the reader arrived by clicking a row, and a reload
+  destroys it. Both screens now go back to the Data Room root. The alternative —
+  `{ type, parentId }` in the `410` body — leaks nothing, since the order of checks has
+  already established this caller could see the node alive, but it turns an error into a
+  response shape that every later producer owes, including the Phase 4 share `410`s, which
+  have no node to describe. The link would usually be dead anyway: the subtree delete
+  stamps every ancestor in one statement, so a file's parent is very likely `410` itself.
+- **Two Phase 3 checkboxes added that nothing had scheduled.** The file `410` screen was
+  deferred by Phase 2 and never picked up by Phase 3, and `NodeRoute`'s type dispatch was
+  implied by the route structure and written down nowhere. A commitment recorded in one
+  document and unscheduled in the other looks planned and is not.
+- **Four invariants carried into Phase 3's "watch for"**, each currently true for a reason
+  that stops holding once `FILE` rows exist: a file's `path` needs the same trailing slash
+  and app-generated id as a folder's, or `LIKE path || '%'` matches siblings; the subtree
+  delete already handles a single file and must not acquire a second writer of
+  `deleted_at`; `deleteSubtree` takes no advisory lock, so a concurrent delete can make an
+  upload's quota check refuse `422` and then succeed on retry (accepted — the room cannot
+  go *over* quota); and the folders-before-files order has never executed against mixed
+  data, resting on the enum's declaration order and the keyset's `::"NodeType"` cast.
+- **`@nestjs/throttler` needs no early raise.** The stale rationale in `roadmap.md` said to
+  install it ahead of Phase 3 so `minimum-release-age=10080` would not refuse it. Verified
+  at the boundary: the newest release is `6.5.0` from 2025-12-02, nine months clear of the
+  gate, peer range covering `@nestjs/common ^11`. It stays where it was scheduled.
+- **`applyAggregateDelta` is four call sites but five calls.** Move calls it twice —
+  negative off the old ancestor chain, positive onto the new. The two room updates net to
+  zero, which is correct: a move relocates a subtree inside one room and changes no
+  whole-room total. Both the docstring and the roadmap said "four", and someone would have
+  counted.
+
 ### Added — Phase 1, backend skeleton
 
 - **Workspace.** pnpm workspaces with `apps/api` and `packages/contracts`. Every

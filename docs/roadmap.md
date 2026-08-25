@@ -226,9 +226,10 @@ excluding already-deleted rows; and `23505` mapping to `409` on create and renam
       delta from `RETURNING type, size`. The `UPDATE` and the ancestor delta are **one
       transaction** — a delta applied outside it can be lost against a stamp that was not
 - [x] Delete warning showing real subtree counts
-- [x] `applyAggregateDelta` helper — **four** call sites: create and delete here,
-      upload-complete and move in Phase 3. Restore is out of scope (decision #6 ships no
-      trash UI), so it is not one of them and never will be
+- [x] `applyAggregateDelta` helper — **four** call sites, five calls: create and delete
+      here, upload-complete and move in Phase 3, move calling it twice (negative off the
+      old ancestor chain, positive onto the new). Restore is out of scope (decision #6
+      ships no trash UI), so it is not one of them and never will be
 - [x] **Integration harness** against the compose Postgres — migrations, per-test cleanup,
       Vitest config. Paid once here; it makes the two Phase 3 tests nearly free
 - [x] **Two integration tests, here rather than in Phase 4** (decision #26), because they
@@ -249,11 +250,43 @@ excluding already-deleted rows; and `23505` mapping to `409` on create and renam
 on both the presigned PUT and GET; the presigned GET never served from cache; and the
 auto-suffix retry re-running the whole transaction rather than the statement.
 
+**Carried in from the Phase 2 → 3 forward-compat pass.** Four things Phase 2 satisfies by
+accident, because it has only one node type and nothing that reads the quota:
+
+- **A file's `path` is built exactly as a folder's**: `` `${parentPath}${id}/` `` with the
+  id from `randomUUID()` in application code before the insert (`node.repository.ts`
+  `createFolder`), **trailing slash included**. The slash is the whole reason
+  `LIKE path || '%'` matches a subtree and nothing else — without it `/a/b/` would
+  prefix-match a sibling `/a/bc/`, and a single-file delete would take an unrelated node
+  with it. A database-side `@default(uuid())` cannot be used: `path` contains the node's
+  own id and is `NOT NULL`.
+- **`deleteSubtree` needs no file-specific path.** For a `FILE` the subtree `UPDATE` stamps
+  exactly one row and `RETURNING type, size` yields `{ size: -n, files: -1, folders: 0 }`
+  over strict ancestors. Reuse it; do not write a second writer of `deleted_at`.
+- **`deleteSubtree` takes no advisory lock, and upload-complete does.** A delete running
+  concurrently frees space that the authoritative quota check inside the locked transaction
+  cannot see, so an upload can be refused `422` and then succeed on retry. Never the other
+  way round — the room cannot go over quota — so this is accepted, not fixed. Making the
+  delete take the same lock would serialize every mutation in the room. Decide it here
+  rather than rediscovering it as a flaky test.
+- **The listing's folders-before-files order has never run against mixed data.** It rests
+  on `CREATE TYPE "NodeType" AS ENUM ('FOLDER', 'FILE')` fixing the enum's sort order, and
+  on the keyset casting to `"NodeType"` rather than to text so a page boundary compares on
+  that same order. Both are right by inspection; the test below is what executes them.
+
+**Route structure needs nothing new**: `GET /nodes/:fileId` already resolves today —
+`resolveLiveNode` succeeds, `children` comes back empty, breadcrumbs are correct — so
+`/rooms/:roomId/n/:nodeId` serves both node types and `NodeRoute` dispatches on `node.type`.
+`node-table.tsx` already renders file rows and deliberately leaves the name unlinked;
+Phase 3 turns that `<span>` into a `Link`.
+
 - [ ] `StorageService`: presign PUT/GET, HEAD, delete — one implementation, MinIO and GCS
 - [ ] Add `@nestjs/throttler` — the one new runtime dependency this phase needs, and the
-      only way the presign rate limit below gets enforced. Raise it **before** the phase
-      starts: `minimum-release-age=10080` refuses any release younger than 7 days, so a
-      recent version cannot be installed on the day it turns out to be needed
+      only way the presign rate limit below gets enforced. **The age gate does not bite
+      here** (checked at the Phase 2 → 3 boundary): the newest release is `6.5.0`,
+      published 2025-12-02, so `minimum-release-age=10080` will not refuse it and there is
+      nothing to raise early. Peer range covers `@nestjs/common ^11`. The rule still
+      applies to anything else this phase reaches for on the day it needs it
 - [ ] `POST /uploads/presign`: validation, advisory quota check, `PENDING` blobs, rate
       limit. `Content-Type: application/pdf` signed into the PUT
 - [ ] `POST /uploads/complete`: `HEAD` **before** the transaction opens; then
@@ -265,6 +298,15 @@ auto-suffix retry re-running the whole transaction rather than the statement.
 - [ ] Dropzone: multiple files, **drag-and-drop**, per-file progress via `XMLHttpRequest`,
       per-file error rows, cancel
 - [ ] PDF preview via `<iframe>`, presigned URL fetched with `staleTime: 0`
+- [ ] `NodeRoute` dispatches on `node.type` — `FILE` renders the preview, `FOLDER` the
+      browser. Same route, no new one: the browse endpoint already answers for a file id
+- [ ] The deleted-**file** `410` screen, owed by Phase 2 and unscheduled until now
+      (`architecture.md` § `410` on both node types). It is a **second component, not a
+      second destination**: the copy names a file, the link goes back to the Data Room
+      root exactly as the folder screen's does. A `410` carries no body, so on a direct
+      load the client cannot know the type — the file wording is reachable only when the
+      reader arrived from the preview route with the type already in hand, and the folder
+      screen is the fallback everywhere else
 - [ ] Rename file (`409` + dialog), delete file
 - [ ] Move file via the **"Move to…" dialog** with a folder picker — the primary
       affordance per decision #19, and the one that satisfies the brief on its own.
@@ -277,6 +319,11 @@ auto-suffix retry re-running the whole transaction rather than the statement.
       - move cycle guard rejects a folder into its own descendant. `BRIEF.md` only
         requires moving a *file*, and no phase builds a folder-move UI — the guard lives
         in the shared repository move method, which this test exercises directly
+- [ ] Extend the Phase 2 listing coverage to **mixed data** — a folder holding both
+      folders and files, paged across a boundary. Nearly free on the existing harness, and
+      it is the only thing that actually executes the enum sort order and the keyset's
+      `::"NodeType"` cast. Not a third integration test so much as the first real input to
+      the second one
 - [ ] Verify `StorageService` once against the real GCS bucket via an env flip (~10 min) —
       presign PUT/GET, CORS, and the `response-*` overrides, which are exactly the
       parameters whose GCS behaviour can differ from MinIO's
