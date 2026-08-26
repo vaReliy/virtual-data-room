@@ -3,11 +3,18 @@
 Virtual Data Room — take-home project. A secure repository for storing and sharing
 documents during due diligence.
 
-**Status: design closed. Phases 0–2 shipped; Phase 3 (Files) is next.** The API serves the
-folder browser end to end — `AccessScope`, the node repository with its raw-SQL tree
-statements, and the four node endpoints — and the web app browses, creates, renames and
-deletes folders against it. Phase 3 runs as **two sessions**, S1 backend and S2 web; each
-starts from its brief in gitignored `notes/issues/phase-3/issues/`.
+**Status: design closed. Phases 0–3 shipped; Phase 4 (Sharing) is next and is groomed.**
+The API serves the folder browser and files end to end — `AccessScope`, the node repository
+with its raw-SQL tree statements, the node endpoints, the three-step upload protocol, move,
+and the content URL with its `?disposition=` — and the web app browses, creates, renames,
+deletes, uploads, previews, moves and downloads against it. Phase 4's issue 05 (download)
+landed early with that last one.
+
+Phase 4 starts from **`notes/issues/phase-4/PRD.md`** (gitignored), which carries the
+grooming decisions and the issue list `06`–`12`. Read
+`notes/issues/phase-4/HANDOVER.md` before a long issue: it says where to stop, what to
+write into `notes/issues/phase-4/progress/`, and what to say — so a session ends at a
+boundary it chose rather than wherever it ran out of room.
 
 ## Read before working
 
@@ -17,7 +24,7 @@ Load only what the task needs — these are not all required at once.
 | ---------------------- | -------------------------------------------------------------------------------------------------------- |
 | `CONTEXT.md`           | Always. Domain vocabulary used in code, tests and UI.                                                    |
 | `BRIEF.md`             | The brief. **Read-only — never edit.**                                                                   |
-| `docs/decisions.md`    | Before changing anything architectural. 28 accepted decisions with rationale. Nothing is left undecided. |
+| `docs/decisions.md`    | Before changing anything architectural. Every accepted decision, with its rationale. Nothing is left undecided. |
 | `docs/data-model.md`   | Schema work, migrations, queries, indexes, invariants.                                                   |
 | `docs/architecture.md` | Layers, access control, upload flow, error contract, folder layout.                                      |
 | `docs/roadmap.md`      | Always, before picking up work. Task-level plan, per-phase scope, descope order.                         |
@@ -156,7 +163,13 @@ repository has no remote configured, so an agent must not reach for `gh` or open
 
 - One phase or feature per directory: `notes/issues/<slug>/`, e.g. `phase-3/`, `phase-4.1/`.
 - The brief for the whole set is `notes/issues/<slug>/PRD.md`.
-- Individual issues are `notes/issues/<slug>/issues/<NN>-<slug>.md`, numbered from `01`.
+- Individual issues are `notes/issues/<slug>/issues/<NN>-<slug>.md`, numbered from `01` —
+  unless the set inherits issues from another one, in which case the numbering continues
+  around them and the PRD says so. Phase 4 is that case: `03`–`05` were groomed for
+  Phase 4.1 and pulled forward, so its sharing issues start at `06`. Numbers are never
+  reused within a directory and never renumbered once a commit references them; a bare
+  number is meaningful only inside one directory, so a cross-directory reference is always
+  a full path.
 - `notes/issues/<slug>/deviations.md` carries what a session learned that the next one
   cannot re-derive — a real bucket's behaviour, a library that did not do what its docs
   said. `notes/` is gitignored, so anything that must outlive the work belongs in
