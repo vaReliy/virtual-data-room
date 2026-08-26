@@ -9,6 +9,30 @@ otherwise see.
 
 ## [Unreleased]
 
+### Added — Row-menu icons, and "Shared with me" becomes its own route (Phase 4, issue 08.4)
+
+- **Every row-menu item now has an icon.** Rename got `Pencil`, Move got `FolderInput`, and
+  Delete got `Trash2` — the same destructive glyph `ShareList`'s revoke button already used,
+  so the two menus in this app do not use different icons for the same kind of action.
+- **`/` no longer renders "Shared with me" — it is now an unconditional redirect** to the
+  caller's own Data Room, with no dependency on `useSharedWithMe()` at all. This supersedes
+  the "lives at `/`" behaviour the 08.1–08.3 entry below describes: that design worked only
+  as long as a signed-in user could be in at most one place, and Phase 4 sharing broke that
+  once a grantee held both a room and a grant.
+- **"Shared with me" moved to its own route, `/shared`,** rendered unconditionally —
+  including an empty state ("Nothing has been shared with you yet.") it did not previously
+  need, since it used to be reachable only past a non-empty guard in `home.tsx`.
+- **`AppShell` gained a permanent nav link to `/shared`,** with a count badge from the same
+  `useSharedWithMe()` query `/shared` itself uses — TanStack Query dedupes the key, so
+  mounting both is not a second request. The link is never hidden at zero count: hiding it
+  would make it appear the moment someone first shares something with the caller, with no
+  other notification surface in this phase to soften that (no Activity feed exists yet).
+  `AppShellSkeleton` grew a matching placeholder from the same `{ to, label }` list the real
+  header renders from, so the two cannot drift out of sync by hand-copied dimensions.
+- **Amends decision #23's "no switcher" clause** (`docs/decisions.md`): still one owned
+  room, still no create-room/list/rename, but a nav link now reaches a second legitimate
+  destination.
+
 ### Added — Sharing: the web surface (Phase 4, issues 08.1, 08.2, 08.3)
 
 - **A `LINK` share's URL is unrecoverable by design, and the dialog is built around that.**

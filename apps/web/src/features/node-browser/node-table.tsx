@@ -1,6 +1,16 @@
 import { useState, type DragEvent } from 'react';
 import { Link } from 'react-router';
-import { CornerLeftUp, Download, File, Folder, MoreHorizontal, Share2 } from 'lucide-react';
+import {
+  CornerLeftUp,
+  Download,
+  File,
+  Folder,
+  FolderInput,
+  MoreHorizontal,
+  Pencil,
+  Share2,
+  Trash2,
+} from 'lucide-react';
 import type { NodeSummary } from '@dr/contracts';
 
 import { Button } from '@/components/ui/button';
@@ -268,6 +278,7 @@ export function NodeTable({
                               onRename(node);
                             }}
                           >
+                            <Pencil />
                             Rename
                           </DropdownMenuItem>
                         ) : null}
@@ -292,6 +303,7 @@ export function NodeTable({
                               onMove(node);
                             }}
                           >
+                            <FolderInput />
                             Move to…
                           </DropdownMenuItem>
                         ) : null}
@@ -302,6 +314,7 @@ export function NodeTable({
                               onDelete(node);
                             }}
                           >
+                            <Trash2 />
                             Delete
                           </DropdownMenuItem>
                         ) : null}

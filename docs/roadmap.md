@@ -493,6 +493,12 @@ carries no token and is never reached through `/s/:token` (decision #27).
 - [ ] Share dialog: mode toggle, link copy, grantee list, revoke
 - [ ] Seed: Demo Owner user + populated room; on first login auto-create a `USER` share to
       the new user's verified email
+- [x] **New scope, added after this phase's original grooming (issue 08.4):** row-menu
+      icons on every item, and `/` narrowed to an unconditional redirect with "Shared with
+      me" moved to its own `/shared` route, reachable from a permanent `AppShell` nav link.
+      Narrows decision #23's "no switcher" clause — sharing means a signed-in user can now
+      legitimately be in two places — without reopening the rest of it: still one owned
+      room, still no create-room/list/rename
 - [x] **Unit tests, mocked repository** — `AccessControlService`: scope boundaries,
       breadcrumb clipping, revoked and expired links, ancestor inheritance, and a `USER`
       grant matching only a **verified** session email — not a token branch, which

@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { Building2, File, Folder } from 'lucide-react';
+import { Building2, File, Folder, Inbox } from 'lucide-react';
 import type { SharedWithMeEntry } from '@dr/contracts';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -43,9 +43,8 @@ function SharedWithMeRow({ entry }: { entry: SharedWithMeEntry }) {
 }
 
 /**
- * The home screen's "Shared with me" list. `home.tsx` renders this only once its query has
- * resolved with at least one row — an empty result redirects instead, so there is no empty
- * state here to build.
+ * The `/shared` route's "Shared with me" list, rendered unconditionally — including when
+ * there is nothing to show.
  */
 export function SharedWithMeSection({ entries }: { entries: SharedWithMeEntry[] }) {
   return (
@@ -55,11 +54,18 @@ export function SharedWithMeSection({ entries }: { entries: SharedWithMeEntry[] 
           <CardTitle>Shared with me</CardTitle>
         </CardHeader>
         <CardContent>
-          <ul className="divide-y">
-            {entries.map((entry) => (
-              <SharedWithMeRow key={`${entry.dataRoomId}:${entry.nodeId ?? 'room'}`} entry={entry} />
-            ))}
-          </ul>
+          {entries.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-10 text-center">
+              <Inbox className="size-10 text-muted-foreground" strokeWidth={1.5} />
+              <p className="text-sm text-muted-foreground">Nothing has been shared with you yet.</p>
+            </div>
+          ) : (
+            <ul className="divide-y">
+              {entries.map((entry) => (
+                <SharedWithMeRow key={`${entry.dataRoomId}:${entry.nodeId ?? 'room'}`} entry={entry} />
+              ))}
+            </ul>
+          )}
         </CardContent>
       </Card>
     </div>

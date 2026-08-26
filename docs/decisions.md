@@ -637,6 +637,23 @@ no reviewer can enter.
 - Reversing this is cheap: the repository already has `create`, so the affordance is a
   controller method and a dialog if it is ever wanted.
 
+**Amendment (Phase 4, issue 08.4): the "no switcher" clause narrows, nothing else does.**
+This decision was written when a signed-in user could see at most one thing —
+`GET /api/me`'s `dataRooms` never held more than one entry, and nothing else was
+reachable. Phase 4 sharing broke that premise: a grantee's live grants are a second,
+legitimate destination (`/shared`, "Shared with me"), so a signed-in user can now be in two
+places. This does not reopen the rest of #23 — still exactly one owned room, still no
+create-room route, still no room list, still no room rename — it only means `/` can no
+longer be the only reachable screen: `/` unconditionally redirects to the caller's own room
+(it no longer branches on shares), and `AppShell` carries a permanent nav link to `/shared`,
+always visible regardless of count. The rejected alternative was hiding that nav link when
+the count is zero — cheaper, since it needed no empty state — but it reproduces the exact
+problem this amendment exists to fix: a nav item that silently appears the moment someone
+shares something with the caller, with no other notification surface in this phase (no
+Activity feed exists yet). It also contradicts both reference products consulted (Google
+Drive, Dropbox), which keep "shared with you" permanently in nav with its own empty state,
+never hidden at zero.
+
 ---
 
 ## 24. Browser response: aggregates travel with what you are looking at

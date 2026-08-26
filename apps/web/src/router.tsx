@@ -9,6 +9,7 @@ import { NodeRoute } from '@/routes/rooms.$roomId.n.$nodeId';
 import { RoomRoute } from '@/routes/rooms.$roomId';
 import { SharedNodeRootRoute } from '@/routes/s.$token';
 import { SharedNodeRoute } from '@/routes/s.$token.n.$nodeId';
+import { SharedRoute } from '@/routes/shared';
 import { TermsRoute } from '@/routes/terms';
 
 /**
@@ -34,6 +35,7 @@ export const router = createBrowserRouter([
     Component: SessionGate,
     children: [
       { index: true, Component: HomeRoute },
+      { path: 'shared', Component: SharedRoute },
       { path: 'rooms/:roomId', Component: RoomRoute },
       { path: 'rooms/:roomId/n/:nodeId', Component: NodeRoute },
     ],

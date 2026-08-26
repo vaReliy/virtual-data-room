@@ -663,21 +663,33 @@ shares, and one with a live share of each mode.
 **Preconditions:** two Google accounts, A (owner) and B (grantee). A has shared one folder
 with B by email, using **A specific person**, and B holds no other grants.
 
+`/` never renders "Shared with me" itself — it always redirects to the caller's own room.
+The section lives at its own route, `/shared`, reachable from a permanent nav link in the
+header ("Shared with me") that carries a count badge once it loads.
+
 1. Sign in as B, with no shares yet.
-   - Expected: `/` lands directly in B's own Data Room, exactly as before this feature — no
-     new section, no flash of one.
-2. As A, share a folder with B's address, then sign in as B again (or reload `/` in an
-   already-signed-in tab).
-   - Expected: `/` now renders a "Shared with me" section instead of redirecting, with one
-     row naming **the folder**, not the room, and "Shared by" naming A.
-3. Follow the row.
+   - Expected: `/` redirects straight to B's own Data Room, same as always. The "Shared with
+     me" nav link is present in the header regardless, its badge reading `0` once loaded —
+     the link is never hidden for holding nothing.
+2. Open `/shared` directly (B still holds no grants).
+   - Expected: the section renders anyway, with one line saying nothing has been shared yet
+     — not a blank card, not a redirect back to B's room.
+3. As A, share a folder with B's address, then reload `/shared` as B (or sign in again).
+   - Expected: the nav badge shows `1`, and the section lists one row naming **the folder**,
+     not the room, with "Shared by" naming A.
+4. Follow the row.
    - Expected: it opens the folder with breadcrumbs starting **there** — no room name in the
      header, nothing above the grant.
-4. As A, share the whole Data Room with B (a second grant, `nodeId: null`).
-   - Expected: a second row appears naming **the room**, and following it opens the room
-     itself.
-5. As A, revoke both grants.
-   - Expected: B's next visit to `/` redirects straight to B's own room again.
+5. As A, share the whole Data Room with B (a second grant, `nodeId: null`).
+   - Expected: a second row appears naming **the room**, following it opens the room itself,
+     and the nav badge reads `2`.
+6. As B, with both grants still live, visit `/`.
+   - Expected: still redirects straight to B's own room — `/` never depends on whether B
+     holds any shares. B reaches the shared items only via the "Shared with me" nav link.
+7. As A, revoke both grants.
+   - Expected: B's `/shared` next shows the empty-state line again, and the nav badge reads
+     `0` — it is not hidden, since the link itself is always visible whether or not B holds
+     anything.
 
 ---
 

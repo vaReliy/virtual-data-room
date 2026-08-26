@@ -5,7 +5,16 @@ import type { SessionUser } from '@dr/contracts';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useSharedWithMe } from '@/features/share/use-shared-with-me';
 import { useLogout } from './use-session';
+
+/**
+ * The one nav item between the wordmark and the user cluster. A list of one exists so
+ * `AppShellSkeleton` renders a placeholder of the same shape without hand-copying
+ * dimensions between the two components — the actual duplication risk here, since this
+ * header is rendered exactly once, by `AppShell` itself.
+ */
+const NAV_ITEMS = [{ to: '/shared', label: 'Shared with me' }] as const;
 
 function initials(user: SessionUser): string {
   const source = user.name ?? user.email;
@@ -28,6 +37,9 @@ function initials(user: SessionUser): string {
  */
 export function AppShell({ user, children }: { user: SessionUser; children: ReactNode }) {
   const { logout, isPending } = useLogout();
+  // Same query key as `SharedRoute`'s own `useSharedWithMe()` — TanStack Query dedupes it,
+  // so mounting both here and on `/shared` is not a second request.
+  const sharedWithMe = useSharedWithMe();
 
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
@@ -38,6 +50,18 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
         >
           Virtual Data Room
         </Link>
+        <nav className="flex flex-1 items-center gap-4 text-sm">
+          {NAV_ITEMS.map((item) => (
+            <Link key={item.to} to={item.to} className="flex items-center gap-1.5 hover:underline">
+              {item.label}
+              {sharedWithMe.data ? (
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 text-xs font-medium text-muted-foreground">
+                  {sharedWithMe.data.length}
+                </span>
+              ) : null}
+            </Link>
+          ))}
+        </nav>
         <div className="flex items-center gap-3">
           <div className="hidden text-right sm:block">
             <div className="text-sm leading-tight font-medium">{user.name ?? user.email}</div>
@@ -65,6 +89,11 @@ export function AppShellSkeleton() {
     <div className="flex h-full flex-col bg-background">
       <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b px-4 sm:px-6">
         <span className="text-sm font-semibold tracking-tight">Virtual Data Room</span>
+        <nav className="flex flex-1 items-center gap-4 text-sm">
+          {NAV_ITEMS.map((item) => (
+            <Skeleton key={item.to} className="h-4 w-28" />
+          ))}
+        </nav>
         <div className="flex items-center gap-3">
           <Skeleton className="hidden h-4 w-32 sm:block" />
           <Skeleton className="size-8 rounded-full" />
