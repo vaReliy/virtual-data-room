@@ -79,16 +79,36 @@ type AccessScope = {
 **Resolution for a signed-in user**
 
 1. Owner of the Data Room → `rootPath = '/'`, `role = OWNER`.
-2. Otherwise, look for a live `USER` grant whose `granteeEmail` equals the verified
-   session email, on this node or any ancestor (ancestor ids come from `path`, no query).
-3. The matched grant's node defines `rootNodeId` / `rootPath`; `role = VIEWER`.
-4. No grant → 404 (not 403 — existence itself is information).
+2. Otherwise read the user row and require `emailVerified`. The session token carries
+   `{ sub, email }` and no verification flag, so this is one primary-key read on the
+   non-owner path only; adding the claim to the JWT instead would log out every open
+   session. An unverified address matches nothing and falls through to step 6.
+3. Load every live `USER` grant for that verified address in this room —
+   `revokedAt IS NULL`, and `expiresAt` null or in the future.
+4. **The broadest live grant wins** (decision #29): a whole-room grant (`node_id IS NULL`)
+   outright, otherwise the shortest `path`, tie-broken by `created_at` ascending and then
+   by `id`. Access is derived from ancestry, so the higher grant already subsumes the lower
+   one; the tie-breaks are what stop the same request resolving two ways on two page loads.
+5. The chosen grant's node defines `rootNodeId` / `rootPath` — inclusive, so the shared
+   node is inside its own boundary — and `role = VIEWER`. **A soft-deleted node still
+   produces a scope**: the `410` is raised on the node, where every other one is, so that
+   a grantee whose folder was deleted is told that rather than "you were never given this".
+6. No grant → 404 (not 403 — existence itself is information).
+
+Because the room id arrives without a node id, this must choose **one** scope before it
+knows what the caller is about to read — which is why step 4 is a rule rather than a
+preference. A subtree scope also means the caller's root is a real node, so `browse` at
+that root resolves it for liveness; an owner (`rootNodeId === null`) never pays that query.
 
 **Resolution for an anonymous token**
 
 1. Hash the token, look up a `LINK` share where `revokedAt IS NULL` and
    `expiresAt` is null or in the future.
-2. The share's node defines the scope; `role = VIEWER`.
+2. The share's node defines the scope; `role = VIEWER`. A whole-room `LINK`
+   (`node_id IS NULL`) gives `rootPath = '/'`, exactly as a whole-room grant does.
+3. Unknown, revoked and expired are **one** answer — `410` — and are not distinguished.
+   There is no `mode` branch: `shares_mode_check` keeps `token_hash` null on every `USER`
+   row, so a token can only ever find a `LINK`, and a branch for one would be dead code.
 
 **Enforcement.** Every repository query is bounded by
 `path startsWith scope.rootPath`, so a node above the shared root does not exist for
@@ -145,12 +165,11 @@ implementation detail — stop and ask.
 | `DataRoomRepository.findInScope` | Bounded by `scope.dataRoomId`, with no path predicate. | A Data Room is the scoping boundary itself; there is no ancestry to clip. Whether the room may be *shown* is the caller's decision, and `NodeService` makes it only when `scope.rootNodeId === null`. |
 | `DataRoomRepository` — `listOwnedBy`, `countOwnedBy`, `create`, `findOwnedById` | Take no `AccessScope`. | `ownerId`. These run *before* a scope exists: `findOwnedById` is what `AccessControlService` uses to produce one. |
 | `UserRepository` | Takes no `AccessScope`. | Identity. There is no tree to bound, and the caller is by definition the row's subject. |
+| `NodeRepository.findGrantNodeInRoom` | Takes **no** `AccessScope`, and returns soft-deleted rows: neither a `path LIKE` nor a `deleted_at IS NULL`. Raw SQL. | `data_room_id`, plus a node id that came from a `Share` row this API wrote and never from a request. It runs *before* a scope exists — producing one is its purpose. It sees deleted rows because a grant whose node was deleted owes the grantee a `410`, not a `404`, and the extension overwrites a caller-supplied `deletedAt` by design. It lives in `node.repository.ts` because of the tool it needs, not the subject it serves. |
+| `ShareRepository.findLiveGrantsForEmail` | Takes no `AccessScope`. | `data_room_id` plus a **verified** session email. It runs before a scope exists; an unverified address must never reach it (decision #7). |
+| `ShareRepository.findLiveByTokenHash` | Takes neither a scope nor a room id. | The unique index `shares_token_hash_key`. The token *is* the authorization — possession of the hash preimage is the capability — and it is the only input the anonymous surface has. |
+| `ShareRepository.listForGrantee` | Crosses Data Rooms on purpose. | The verified session email alone. Spanning rooms is what "Shared with me" is; bounding it to one would defeat it. Grants whose node has been deleted are filtered out explicitly — the soft-delete extension narrows a query on `Node`, not a relation filter inside a query on `Share`. |
 | `BlobRepository` | Takes `scope.dataRoomId`, not a full `AccessScope`. A blob has no `path` and no ancestry to clip. | `id` plus `storageKey: { startsWith: dataRoomId + '/' }` — Prisma, **not** raw SQL, so the raw-SQL rule and its ESLint boundary are untouched; `startsWith` still compiles to a `LIKE` in the `WHERE` clause, which is the property that matters. `Blob` carries no `dataRoomId` column, so the key *is* the tenancy — which is why its format is a decision (#28) and not a convention. Without the predicate a caller could attach another room's blob to their own node. `Blob` is not in `SOFT_DELETABLE_MODELS`, so the extension leaves these reads alone. |
-
-One more is already known and deliberately absent, because it would have no caller yet:
-the `dataRoomId`-bounded node lookup that resolves a grant from a target node's ancestors
-takes **no** `AccessScope` at all — it runs before one exists. It arrives in Phase 4 with
-sharing, and owner resolution never reads a node.
 
 ## Upload flow
 

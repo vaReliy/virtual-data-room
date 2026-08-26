@@ -68,8 +68,23 @@ export class NodeService {
    * `nodeId` absent means the caller's scope root: `node` is `null` — a synthetic root
    * row with a fabricated id eventually gets treated as a real one — and `breadcrumbs` is
    * empty, since there is nowhere further up that the caller is allowed to know about.
+   *
+   * **A subtree-scoped caller's root is a real node, and it can have been deleted.** For
+   * an owner there is nothing to check — the room root is not a node — but for a grantee
+   * the shared folder itself is one, and every child of a deleted folder is stamped too.
+   * Without the check below the listing comes back empty and the screen says "Nothing here
+   * yet": a silent falsehood about somebody else's documents, where the truth is a `410`
+   * and the "deleted by the owner" screen. The result is discarded on purpose — `node`
+   * stays `null`, because the scope root still has no row this contract may describe.
+   *
+   * One extra query, on the grantee path only. An owner has `rootNodeId === null` and
+   * never pays it.
    */
   async browse(scope: AccessScope, nodeId?: string, cursor?: string): Promise<BrowseResponse> {
+    if (nodeId === undefined && scope.rootNodeId !== null) {
+      await this.resolveLiveNode(scope, scope.rootNodeId);
+    }
+
     const node = nodeId === undefined ? null : await this.resolveLiveNode(scope, nodeId);
 
     // The listing is keyed on COALESCE(parent_id, data_room_id), so root-level children

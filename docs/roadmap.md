@@ -466,13 +466,13 @@ Two positive gates, so the phase can be called finished rather than argued about
 with one Google account; and the two resolution paths staying separate — a `USER` share
 carries no token and is never reached through `/s/:token` (decision #27).
 
-- [ ] `ShareRepository` + `ShareService`: create link share (`randomBytes(32)`, stored
+- [x] `ShareRepository` + `ShareService`: create link share (`randomBytes(32)`, stored
       hashed), create user share by email, list, revoke
-- [ ] `AccessControlService.resolveForToken` — **`LINK` only, no `mode` branch.** A token
+- [x] `AccessControlService.resolveForToken` — **`LINK` only, no `mode` branch.** A token
       can only ever find a `LINK` share, because `shares_mode_check` keeps `token_hash`
       null on `USER` rows. Anonymous; live, unrevoked and unexpired, else `410`
       (decision #27)
-- [ ] Ancestor-grant lookup, and with it the second soft-delete bypass: the
+- [x] Ancestor-grant lookup, and with it the second soft-delete bypass: the
       `dataRoomId`-bounded node lookup that takes **no** `AccessScope`. It belongs here,
       not in Phase 2 — owner resolution never reads a node, so before grants exist this
       method would have no caller
@@ -486,7 +486,7 @@ carries no token and is never reached through `/s/:token` (decision #27).
 - [ ] Share dialog: mode toggle, link copy, grantee list, revoke
 - [ ] Seed: Demo Owner user + populated room; on first login auto-create a `USER` share to
       the new user's verified email
-- [ ] **Unit tests, mocked repository** — `AccessControlService`: scope boundaries,
+- [x] **Unit tests, mocked repository** — `AccessControlService`: scope boundaries,
       breadcrumb clipping, revoked and expired links, ancestor inheritance, and a `USER`
       grant matching only a **verified** session email — not a token branch, which
       decision #27 removed. Written here, where the service reaches its final shape

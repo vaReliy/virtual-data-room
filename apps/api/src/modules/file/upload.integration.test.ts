@@ -18,6 +18,7 @@ import { UserRepository } from '../auth/user.repository';
 import { DataRoomRepository } from '../data-room/data-room.repository';
 import { NodeRepository } from '../node/node.repository';
 import { NodeService } from '../node/node.service';
+import { ShareRepository } from '../share/share.repository';
 import { BlobRepository } from './blob.repository';
 import { UploadService } from './upload.service';
 
@@ -46,7 +47,12 @@ describe('upload protocol against Postgres', () => {
     const blobs = new BlobRepository(prisma);
     dataRooms = new DataRoomRepository(prisma);
     users = new UserRepository(prisma);
-    accessControl = new AccessControlService(dataRooms);
+    accessControl = new AccessControlService(
+      dataRooms,
+      new ShareRepository(prisma),
+      nodeRepository,
+      users,
+    );
 
     uploads = new UploadService(
       blobs,

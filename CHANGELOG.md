@@ -9,6 +9,59 @@ otherwise see.
 
 ## [Unreleased]
 
+### Added — Sharing: shares written, and grants resolved (Phase 4, issue 06)
+
+- **A `LINK` share's URL is returned exactly once**, in the response to the call that
+  created it. `randomBytes(32).toString('base64url')` is minted in `share-token.ts`, only
+  its SHA-256 reaches `token_hash`, and `shareSummarySchema` has **no field** for a token —
+  that absence is the enforcement, not a convention. No endpoint can be added later to show
+  a lost link again without defeating the reason it is hashed; the way to replace one is to
+  revoke it and create another. Issue 08's dialog has to say so at creation time.
+- **`NodeRepository.findGrantNodeInRoom` deliberately sees soft-deleted rows and takes no
+  `AccessScope`.** Both omissions are load-bearing. It runs *before* a scope exists —
+  producing one is its purpose — and it must return a deleted node so that a grantee whose
+  folder the owner removed gets `410` ("deleted by the owner") rather than `404` ("you were
+  never given this"). It lives in `node.repository.ts` because of the **tool** it needs, not
+  the subject it serves: the soft-delete extension overwrites a caller-supplied `deletedAt`
+  by design, so raw SQL is the only way past it, and ESLint confines raw SQL to that file.
+  Moving it to `share.repository.ts`, where its subject suggests it belongs, trips that rule
+  — and the rule must not be weakened to allow it.
+- **Three `ShareRepository` reads take no `AccessScope`**, each now a row in
+  `architecture.md` § Scope-exception inventory: `findLiveGrantsForEmail` (bounded by
+  `dataRoomId` plus a **verified** email), `findLiveByTokenHash` (bounded by the unique
+  index; the token *is* the authorization), and `listForGrantee` (crosses rooms on purpose
+  — that is what "Shared with me" is).
+- **The soft-delete extension does not reach a relation filter.** It narrows a query on
+  `Node`; `listForGrantee` queries `Share`, so "drop grants whose node was deleted" is
+  written out explicitly. Its liveness and node-liveness predicates are combined with
+  `AND: [...]` rather than two `OR` keys in one object literal — the second would silently
+  overwrite the first, and the share would stay listed after expiry.
+- **`NodeService.browse` now resolves the scope root for liveness** when no `nodeId` is
+  given and the scope is a subtree. Every child of a deleted folder is stamped too, so
+  without it a grantee saw an empty listing and "Nothing here yet" — a silent falsehood
+  about somebody else's documents. One extra query, on the grantee path only.
+- **The broadest live grant wins** (decision #29), tie-broken by `created_at` then `id` so
+  the same request cannot resolve two ways on two page loads.
+- **`AccessControlService` reads `ShareRepository` and `NodeRepository` straight from
+  `PersistenceModule` and imports no feature module.** `NodeModule` imports `AccessModule`,
+  so an import of `ShareModule` or `NodeModule` here would close a cycle.
+- **A grant is matched only against a *verified* session email** (decision #7). The session
+  JWT carries `{ sub, email }` and no verification flag, so it comes from a primary-key read
+  on the user row, on the non-owner path only. Adding the claim to the token instead would
+  log out every open session.
+- `resolveForToken` has **no `mode` branch** and must not grow one (decision #27):
+  `shares_mode_check` keeps `token_hash` null on every `USER` row. Unknown, revoked and
+  expired tokens are one `410`.
+- **The mode constraint is enforced in Zod first.** `createShareBodySchema` rejects a `USER`
+  body without an address and a `LINK` body with one, so a bad body is a `422` a dialog can
+  render rather than a `500` from a CHECK violation. The grantee address is normalized in
+  the schema (`.trim().toLowerCase()`), because matching a grant is a plain string
+  comparison and one un-normalized write makes it miss silently.
+- No migration: `Share` and `shares_mode_check` shipped with the init migration.
+- `/s/:token` has no controller yet — issue 07 owns the anonymous surface — and the web app
+  has no share dialog or "Shared with me" screen yet (issue 08). `GET
+  /api/shares/shared-with-me` already answers.
+
 ### Fixed — Folder contents no longer change height between states (Phase 4, issue 04)
 
 - **`UploadDropzone`'s wrapper is now a `flex flex-col min-h-(--browser-frame-min-height)`

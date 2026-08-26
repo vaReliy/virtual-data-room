@@ -7,6 +7,7 @@ import { DataRoomModule } from './modules/data-room/data-room.module';
 import { FileModule } from './modules/file/file.module';
 import { HealthModule } from './modules/health/health.module';
 import { NodeModule } from './modules/node/node.module';
+import { ShareModule } from './modules/share/share.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { NodeModule } from './modules/node/node.module';
     DataRoomModule,
     NodeModule,
     FileModule,
+    ShareModule,
   ],
 })
 export class AppModule {}

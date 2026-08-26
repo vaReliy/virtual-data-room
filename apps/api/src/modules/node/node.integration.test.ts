@@ -18,6 +18,7 @@ import { FixturesRepository } from '../../test-support/fixtures.repository';
 import { UserRepository } from '../auth/user.repository';
 import { DataRoomRepository } from '../data-room/data-room.repository';
 import { BlobRepository } from '../file/blob.repository';
+import { ShareRepository } from '../share/share.repository';
 import { NodeRepository } from './node.repository';
 import { NodeService } from './node.service';
 
@@ -51,7 +52,12 @@ describe('node repository against Postgres', () => {
     blobs = new BlobRepository(prisma);
     transactions = new TransactionRunner(prisma);
     nodes = new NodeService(nodeRepository, dataRooms);
-    accessControl = new AccessControlService(dataRooms);
+    accessControl = new AccessControlService(
+      dataRooms,
+      new ShareRepository(prisma),
+      nodeRepository,
+      users,
+    );
   });
 
   afterAll(async () => {

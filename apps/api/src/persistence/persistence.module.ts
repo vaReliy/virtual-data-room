@@ -4,6 +4,7 @@ import { UserRepository } from '../modules/auth/user.repository';
 import { DataRoomRepository } from '../modules/data-room/data-room.repository';
 import { BlobRepository } from '../modules/file/blob.repository';
 import { NodeRepository } from '../modules/node/node.repository';
+import { ShareRepository } from '../modules/share/share.repository';
 import { PrismaService } from './prisma.service';
 import { TransactionRunner } from './transaction.runner';
 
@@ -26,6 +27,7 @@ import { TransactionRunner } from './transaction.runner';
     DataRoomRepository,
     NodeRepository,
     BlobRepository,
+    ShareRepository,
   ],
   exports: [
     TransactionRunner,
@@ -33,6 +35,7 @@ import { TransactionRunner } from './transaction.runner';
     DataRoomRepository,
     NodeRepository,
     BlobRepository,
+    ShareRepository,
   ],
 })
 export class PersistenceModule {}

@@ -172,6 +172,41 @@ export class NodeRepository {
   }
 
   /**
+   * **The second intentional soft-delete bypass**, and the only read here that takes no
+   * `AccessScope`. It resolves the node a `Share` points at to the `path` a scope is built
+   * from.
+   *
+   * Three properties, each of which fails *silently* if it is changed:
+   *
+   * 1. **No `AccessScope`, and there cannot be one.** This runs before a scope exists —
+   *    producing one is its purpose. What bounds it instead is `data_room_id` plus a node
+   *    id that came from a `Share` row this API wrote, never from a request.
+   * 2. **It returns soft-deleted rows.** A grant whose folder the owner has since deleted
+   *    must give the grantee a `410` and the "deleted by the owner" screen, not a `404`
+   *    that reads as "you were never given this". A Prisma read cannot express that: the
+   *    extension overwrites a caller-supplied `deletedAt` by design, so there is no
+   *    argument-level opt-out. `soft-delete.extension.ts` names this method as the reason.
+   * 3. **It lives in this file because of the tool it needs, not the subject it serves.**
+   *    Raw SQL is confined here by ESLint, and (2) makes raw SQL the only way past the
+   *    extension. Moving it to `share.repository.ts` — where its subject would suggest it
+   *    belongs — trips that rule, and the rule must not be weakened to allow it.
+   */
+  async findGrantNodeInRoom(
+    dataRoomId: string,
+    nodeId: string,
+  ): Promise<{ id: string; path: string; deletedAt: Date | null } | null> {
+    const rows = await this.prisma.client.$queryRaw<
+      { id: string; path: string; deletedAt: Date | null }[]
+    >`
+      SELECT id, path, deleted_at AS "deletedAt"
+      FROM nodes
+      WHERE id = ${nodeId}::uuid
+        AND data_room_id = ${dataRoomId}::uuid
+    `;
+    return rows[0] ?? null;
+  }
+
+  /**
    * The names behind a set of ancestor ids, for breadcrumbs. `path` carries UUIDs only,
    * so the names need a second, multi-id read.
    *

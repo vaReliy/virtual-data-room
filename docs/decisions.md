@@ -900,3 +900,44 @@ without a `READY` blob — not in the entity.
 - A new row is owed to the scope-exception inventory for `blob.repository.ts`, and the
   layer diagram gains a repository under `file/` — the only module that writes to the
   database without one.
+
+---
+
+## 29. The broadest live grant defines a grantee's scope
+
+**Status:** Accepted, Phase 4 issue 06. Refines #7's grant resolution; contradicts nothing.
+
+**Context.** `AccessControlService.resolveForUser(userId, dataRoomId)` is called with a
+room id and **no node id** — every node endpoint resolves the scope before it looks at what
+was asked for. It must therefore choose *one* boundary per room before it knows what the
+caller is about to read. Nothing stops an owner holding two live `USER` grants for the same
+person in one room: `/Legal/` today, `/Legal/NDA.pdf` last week.
+
+**Decision.**
+
+> When a grantee holds several live grants in one Data Room, the **broadest** wins: a
+> whole-room grant (`node_id IS NULL`) outright, otherwise the shortest node `path`,
+> tie-broken by `created_at` ascending and then by `id`.
+
+**Rationale.** Access is derived from ancestry, so a grant on `/Legal/` already subsumes
+one on `/Legal/NDA.pdf`. Picking the narrower would *hide* content the grantee has
+legitimately been given, and hide it invisibly — the folder simply would not be there, with
+no error and nothing to report. The tie-breaks are not decoration: without a total order the
+same request can resolve to two different scopes on two page loads, which is the class of
+bug that reproduces for nobody.
+
+**The alternative, and why it lost.** "Newest grant wins" is one line cheaper and reads as
+the more recent intent. It lets a scope *shrink silently* the moment an owner adds a
+narrower share on top of a broader one — the owner sharing one more file would take the
+whole folder away, and neither party would see why.
+
+**Consequences.**
+
+- A grant whose node has been soft-deleted still produces a scope. Filtering it out here
+  would collapse `410` ("the owner deleted this") into `404` ("you were never given this");
+  the `410` is raised on the node, where every other one is.
+- Because a grantee's scope root is a real node, `NodeService.browse` resolves it for
+  liveness when no `nodeId` is given. An owner has `rootNodeId === null` and never pays the
+  extra query.
+- Nothing in the model needs a "primary" or "effective" grant column: the rule is a total
+  order over rows that already exist, evaluated per request.
