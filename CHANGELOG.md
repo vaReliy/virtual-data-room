@@ -9,6 +9,110 @@ otherwise see.
 
 ## [Unreleased]
 
+### Added — Phase 3 (S2), upload queue, PDF preview, file states, move UI
+
+- **Upload queue** (`features/upload/`). The three-step protocol, driven from the browser:
+  a batched presign, one sequential `PUT` per file straight to storage, and one complete
+  per file. Five row states — pending, uploading, error, cancelled, complete — all of them
+  shipped with the screen.
+- **`putObject`** (`features/upload/put-object.ts`). The one request in the app that does
+  **not** go through `api-client.ts`: `XMLHttpRequest`, because `fetch` cannot report upload
+  progress and cannot abort mid-body. Failures are `TransferError`, never `ApiError`.
+- **File drag-and-drop into a folder, and node drag-and-drop between folders.** Two separate
+  native HTML5 mechanisms, no new dependency.
+- **PDF preview** (`features/viewer/`). `<iframe>` on the presigned GET, fetched with
+  `staleTime: 0` / `gcTime: 0` (decision #15). No PDF library.
+- **`NodeView`** dispatches on `node.type`: a file id renders the preview, a folder id the
+  browser. Same route, no new one — and it now owns the loading, `404` and `410` screens for
+  both.
+- **The deleted-file `410` screen**, owed by Phase 2. A second component, not a second
+  destination.
+- **"Move to…" dialog with a folder picker**, the primary move affordance (decision #19),
+  plus dragging a file row onto a folder row.
+
+### Changed — Phase 3 (S2)
+
+- **`apps/web` resolves `@dr/contracts` to `packages/contracts/src`**, through a Vite alias
+  and a matching tsconfig `paths` entry, instead of to the package's `dist`. This is what
+  decision #12 says — "consumed as TypeScript source by both apps" — and the package's
+  `main` never delivered it. It removes the CJS interop, the `optimizeDeps` pre-bundle, and
+  a whole failure mode: Vite keys that pre-bundle on the lockfile and the config, **not** on
+  a linked package's `dist`, so a running dev server kept serving the previous build of the
+  contracts. What that looked like was not an error but `undefined` for every export added
+  since — `NaN MB` in the upload hint, with `presignUploadResponseSchema` silently
+  `undefined` beside it. `apps/web`'s `rootDir` widens to the repository root because the
+  checked program now spans two packages. **`apps/api` is unchanged and still uses `dist`**,
+  so a contract edit still needs `pnpm --filter @dr/contracts build` before its type-check.
+
+### Fixed — Phase 3 (S2)
+
+- **The delete dialog said "This also deletes everything inside it — 583 B" for a file.**
+  Phase 2 wrote that sentence when only folders existed; a file has nothing inside it. It
+  now reads "This file is 583 B." Found by walking the flow in a browser, not by a test.
+
+### Fixed — session guard wiring (found in manual testing)
+
+- **Every guarded request outside `AuthModule` answered `500` once a session passed half its
+  life.** `JwtModule` was registered inside `AuthModule` and not exported, and a guard named
+  in `@UseGuards()` is constructed in the module that declares the **controller** — so
+  exporting `JwtAuthGuard` alone left `NodeModule` and `FileModule` unable to resolve
+  `JwtService`, and the guard was built with `jwt` undefined. `AuthModule` now exports
+  `JwtModule`.
+
+  Two things kept this hidden and are worth remembering. `reissueIfStale` returns before
+  touching `this.jwt` until the token crosses `SESSION_REISSUE_AFTER_SECONDS`, so a fresh
+  login never reaches the branch — a complete manual walk of every flow passed on it, and
+  the failure then arrives an hour later with no code change to blame. And `ConfigModule` is
+  global, so the guard's other dependency resolved anyway, leaving a half-built guard rather
+  than a startup error. `/api/me` kept working throughout, because `MeController` lives in
+  `AuthModule` — the header stayed populated while every folder answered `500`.
+
+  **No test in this repository could have caught it**: the suite wires services by hand and
+  never boots the module graph. `notes/issues/phase-3/issues/03-di-wiring-regression-test.md`
+  carries that gap.
+
+### Notes that the diff does not make obvious — Phase 3 (S2)
+
+- **The two drag mechanisms are told apart by `DataTransfer.types`, and nothing else can
+  do it.** `getData()` is unreadable during `dragover` — the browser's drag protection mode
+  — so at the moment a drop must be accepted or refused, the only visible fact is the type
+  list: `Files` for a file drop, `application/x-vdr-node` for a node drag. The type string
+  is lowercase because the browser normalizes `types`; a capitalized constant would silently
+  never match.
+- **`draggable={false}` on the file name link is load-bearing.** An anchor is draggable by
+  default and would start a _link_ drag — a URL — from the part of the row a user is most
+  likely to grab. Removing that attribute breaks the move drag in a way that looks like the
+  drop target being wrong.
+- **`gcTime: 0` is the half of decision #15 that matters**, not `staleTime: 0`. With
+  `staleTime: 0` alone the presigned URL is still _retained_ after the preview unmounts, so
+  returning to the file inside the default `gcTime` renders the cached URL — and past its
+  300 seconds what appears inside the frame is the storage provider's XML error, looking
+  like a corrupt document. `refetchOnWindowFocus` is off for this one query against the
+  app-wide default: the frame only needs a valid URL when it loads, and swapping `src` under
+  a reader loses their place in the document.
+- **The file `410` wording is reachable in exactly two ways, and neither is a state
+  machine.** A `410` body carries a message and no type. The preview knows it was looking at
+  a file because TanStack keeps the last success beside a failed refetch; a click on a row
+  that has already gone knows because the table put `nodeType` in navigation state — which
+  rides on the history entry, so a **reload** of that entry keeps it too. A link arriving
+  from outside the app carries neither and falls back to the folder wording on purpose. Do
+  not add a type field to the error body to close that gap.
+- **The dropzone rejects on the shared limits and still shows the file.** Wrong type,
+  oversized or an unusable name become `error` rows _before_ presign, from
+  `MAX_FILE_SIZE_BYTES`, `UPLOAD_MIME_TYPE` and `nodeNameSchema` — never a second copy of
+  the numbers. A silently ignored file is worse than a row saying why.
+- **`429` has no backoff and must not grow one.** Twenty presigns a minute at ten files each
+  is two hundred files: a legitimate user cannot reach it, so reaching it means something is
+  wrong and a silent retry would hide it.
+- **Cancel stops being offered once the bytes are in storage.** From there the file is one
+  call from existing, so a row claiming it was stopped would be a lie. A cancelled or
+  abandoned transfer leaves a `PENDING` blob that nothing collects — known, accepted, and
+  the sweeper is Phase 6 README prose.
+- **Rename says nothing about suffixes, on purpose.** Upload auto-suffixes because the name
+  came from a file; rename and move answer `409` because the user chose the name or the
+  destination (decision #20). Copy promising an automatic rename on those dialogs would
+  describe the one path that does not do it.
+
 ### Added — Phase 3 (S1), upload protocol, move and content URLs
 
 - **`StorageService`.** One implementation for MinIO and GCS, reached through GCS's
@@ -43,7 +147,7 @@ otherwise see.
   suffix — a truncated suffix would collide again, which is the one thing the retry cannot
   recover from.
 - **The retry re-runs the whole transaction, and the flip is what proves it.** The
-  conditional `PENDING → READY` update sits *inside* the transaction, so a `23505` on the
+  conditional `PENDING → READY` update sits _inside_ the transaction, so a `23505` on the
   node insert rolls it back and the blob returns to `PENDING`. Move the flip out, or retry
   only the insert, and the second attempt finds the blob `READY`, takes the idempotent
   branch, finds no node, and answers **`410` for an upload that just succeeded**. The
@@ -70,9 +174,9 @@ otherwise see.
 - **`TransactionRunner` is new, in `persistence/`.** Upload-complete spans two repositories,
   so its transaction belongs to neither; services cannot open one because `PrismaService` is
   not exported. It carries the raised Prisma budget — `maxWait` 5 s, `timeout` 15 s — because
-  the advisory lock is taken *inside* the transaction and lock wait counts against `timeout`.
+  the advisory lock is taken _inside_ the transaction and lock wait counts against `timeout`.
 - **`substring(path FROM $n::int)` — the cast is not decoration.** Postgres has two
-  `substring` forms, and `substring(text FROM text)` is the *regex* one. An uncast bind
+  `substring` forms, and `substring(text FROM text)` is the _regex_ one. An uncast bind
   parameter resolves to it, so the offset is read as a pattern, nothing matches, and every
   rewritten `path` comes back `NULL`. Here it surfaced loudly as a `23502` because `path` is
   `NOT NULL`; in a nullable column it would have been silent.
@@ -133,7 +237,7 @@ otherwise see.
   they disagree a row is dropped or repeated at a page boundary.
 - **`applyAggregateDelta` updates `DataRoom` too, in the same transaction.** A root-level
   node has no ancestors, so the ancestor `updateMany` would update nothing at all. It is
-  also the one repository method deliberately *not* clipped to `rootPath`: counters above
+  also the one repository method deliberately _not_ clipped to `rootPath`: counters above
   a share root still have to be right. Both facts are in `architecture.md`'s new
   scope-exception inventory, which is where the next such method must be recorded.
 - **`23505` is caught in two spellings.** The uniqueness index is created in raw SQL, not
@@ -142,7 +246,7 @@ otherwise see.
 - **The integration tests use their own database.** `TEST_DATABASE_URL`, defaulting to
   `…/dataroom_test`, because the harness empties every table between tests — pointing it
   at the compose database would wipe the local sign-in on every run. `prisma migrate
-  deploy` creates it on first use, so there is no setup step. It is read from the real
+deploy` creates it on first use, so there is no setup step. It is read from the real
   environment, **not** from `.env`: Vitest does not load that file, so overriding the
   default means exporting the variable (which is what `ci.yml` does).
 - **`apps/web/src/routes/rooms.$roomId.tsx` is a placeholder between two shapes.** It lost
@@ -172,7 +276,7 @@ otherwise see.
 
 - **The route must never decide what exists, and that is a security property.** There is
   no `dataRooms.find(...)` gate in either room route. `GET /api/me` lists the rooms the
-  caller *owns*, not the rooms they can *reach*; in Phase 4 a `USER`-share recipient
+  caller _owns_, not the rooms they can _reach_; in Phase 4 a `USER`-share recipient
   browses these same private routes, and an ownership gate would 404 them in the client
   before the API was ever asked. Reintroducing one — it looks like a harmless guard —
   breaks sharing one door over from wherever it is added.
@@ -185,7 +289,7 @@ otherwise see.
 - **The `410` screen is a dead end with a way back, never a redirect.** There is no
   nearest-live-ancestor to bounce to: the subtree delete stamps every ancestor in one
   statement, so any bounce lands at the room root anyway. It fires only for a caller
-  standing *inside* the deleted folder; a deleted child just stops appearing in its
+  standing _inside_ the deleted folder; a deleted child just stops appearing in its
   parent's next listing.
 - **One mutation invalidates one browse key, and never the session key.** Aggregates
   travel with what is being viewed (decision #24), so the header and the table are the
@@ -219,7 +323,7 @@ No behaviour changed. The pass ran against the frozen surfaces at the boundary, 
 the last moment `docs/` are cheap to edit, and produced one spec correction plus four
 invariants that Phase 2 satisfies by accident.
 
-- **The deleted-*file* `410` no longer promises a link to its folder**
+- **The deleted-_file_ `410` no longer promises a link to its folder**
   (`architecture.md` § `410` on both node types). It cannot: a `410` carries no body, so
   on a direct load the client knows neither that the node was a file nor which folder held
   it. The type is only in hand when the reader arrived by clicking a row, and a reload
@@ -239,7 +343,7 @@ invariants that Phase 2 satisfies by accident.
   delete already handles a single file and must not acquire a second writer of
   `deleted_at`; `deleteSubtree` takes no advisory lock, so a concurrent delete can make an
   upload's quota check refuse `422` and then succeed on retry (accepted — the room cannot
-  go *over* quota); and the folders-before-files order has never executed against mixed
+  go _over_ quota); and the folders-before-files order has never executed against mixed
   data, resting on the enum's declaration order and the keyset's `::"NodeType"` cast.
 - **`@nestjs/throttler` needs no early raise.** The stale rationale in `roadmap.md` said to
   install it ahead of Phase 3 so `minimum-release-age=10080` would not refuse it. Verified
@@ -328,11 +432,11 @@ Data Room served from Neon.
   S3-compatible XML endpoint; the JSON API ignores it entirely.
 
 Why this was needed: the `Publish app` button on **Audience** stays disabled while the
-**Branding** page's *App domain* section is empty. Those three links are documented as
+**Branding** page's _App domain_ section is empty. Those three links are documented as
 required for every External app in production, and the console names none of them — the
 banner only says the configuration is incomplete. The earlier suspicion that `vercel.app`
 was the blocker is wrong: `vercel.app` is on the Public Suffix List, so
-`virtual-data-room-gamma.vercel.app` *is* a top private domain and the console accepts it
+`virtual-data-room-gamma.vercel.app` _is_ a top private domain and the console accepts it
 as an Authorized domain.
 
 Publication was verified behaviourally, not by reading the console: an account with no
@@ -343,7 +447,7 @@ Testing.
 Carry this forward by hand: **do not upload an app logo and do not start brand
 verification.** The app uses only non-sensitive scopes (`openid`, `userinfo.email`,
 `userinfo.profile`), so verification is not required — but a logo on an External
-production app triggers it, and verification demands a Search Console *Domain property*
+production app triggers it, and verification demands a Search Console _Domain property_
 (DNS-level) proof, which is impossible for a `vercel.app` subdomain. That path ends in a
 state no amount of console work can leave.
 

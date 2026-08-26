@@ -27,6 +27,10 @@ function nodePath(roomId: string, nodeId: string): `/api/${string}` {
   return `/api/rooms/${roomId}/nodes/${nodeId}`;
 }
 
+function movePath(roomId: string, nodeId: string): `/api/${string}` {
+  return `/api/rooms/${roomId}/nodes/${nodeId}/move`;
+}
+
 export type BrowseQuery = UseInfiniteQueryResult<
   InfiniteData<BrowseResponse, string | null>,
   Error
@@ -91,6 +95,35 @@ export function useRenameNode(roomId: string, nodeId?: string) {
     mutationFn: ({ id, name }) =>
       apiSend(nodePath(roomId, id), nodeSummarySchema, 'PATCH', { name }),
     onSuccess: invalidate,
+  });
+}
+
+/**
+ * Moves a node into another folder — `POST /:nodeId/move`, a sub-resource rather than a
+ * field on `PATCH`, so that "move to the room root" (`parentId: null`) cannot be confused
+ * with "the client did not send a parent".
+ *
+ * **Two keys are invalidated, not one.** A move changes the listing the node left *and* the
+ * listing it arrived in, along with the aggregates of both folders. Every other mutation on
+ * this screen touches one location; this is the only one that touches two.
+ *
+ * `409` reaches the caller with its status: the destination already holds that name, and
+ * move deliberately does not auto-suffix (decision #20) — the user chose the destination
+ * knowing what was in it.
+ */
+export function useMoveNode(roomId: string, nodeId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation<NodeSummary, Error, { id: string; parentId: string | null }>({
+    mutationFn: ({ id, parentId }) =>
+      apiSend(movePath(roomId, id), nodeSummarySchema, 'POST', { parentId }),
+    onSuccess: async (_node, { parentId }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.browse(roomId, nodeId) }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.browse(roomId, parentId ?? undefined),
+        }),
+      ]);
+    },
   });
 }
 

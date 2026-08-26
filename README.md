@@ -59,9 +59,22 @@ Or on bare metal, against the compose databases only:
 
 ```bash
 docker compose up -d postgres minio
-pnpm --filter @dr/contracts build   # both apps type-check against its declarations
+pnpm --filter @dr/contracts build   # the API type-checks against its declarations
 pnpm dev
 ```
+
+`pnpm dev` runs both apps in parallel. To run one of them alone:
+
+```bash
+pnpm --filter @dr/api dev     # Nest, watch mode, port 3000
+pnpm --filter @dr/web dev     # Vite, port 5173 (override with VITE_PORT)
+```
+
+The contracts build above is for **`apps/api`** only. The web app resolves `@dr/contracts`
+to `packages/contracts/src` through an alias in `vite.config.ts` and a matching `paths`
+entry in its `tsconfig.json`, so a schema edit reaches the browser through HMR with no
+build step. The API still consumes `dist`, so after editing a contract its type-check fails
+with "has no exported member" until that build runs.
 
 The browser always talks to **one origin**. In development that is Vite's `server.proxy`
 forwarding `/api` to the API; in production it is the Vercel rewrite to Cloud Run. This is
@@ -74,7 +87,39 @@ authentication bug cannot exist only on a laptop. See `docs/decisions.md` #10.
 pnpm typecheck && pnpm lint && pnpm test
 ```
 
-All three must pass before any task is considered done. CI runs exactly these.
+All three must pass before any task is considered done. CI runs exactly these. Each one is
+also available per workspace, which is what to reach for while iterating:
+
+```bash
+pnpm --filter @dr/web typecheck     # tsc --noEmit, browser project
+pnpm --filter @dr/api test          # Vitest; the integration tests need compose Postgres up
+pnpm --filter @dr/contracts test    # Vitest, no services needed
+pnpm eslint apps/web/src            # lint one directory instead of the repository
+```
+
+### Build and format
+
+```bash
+pnpm build                          # every workspace: contracts tsc, api nest, web vite
+pnpm --filter @dr/web build         # type-check then bundle the SPA into apps/web/dist
+pnpm --filter @dr/web preview       # serve that bundle on 4173, with the same /api proxy
+pnpm format                         # Prettier, write mode, whole repository
+npx prettier --check .              # what to run before committing
+```
+
+### When the app looks wrong but the code looks right
+
+Two failure modes here are stale processes rather than bugs, and both have cost a debugging
+session:
+
+- **A dev server that has been running for a day.** A Nest watcher can stop restarting its
+  child, leaving the API executing code from before the last edits — it answers `500` for a
+  bug that is already fixed, and the source line in the stack trace does not match the file.
+  Check when the process actually started (`ps -o lstart -p <pid>`) before believing it.
+- **Vite's dependency pre-bundle.** Its cache is keyed on the lockfile and the config, not
+  on the contents of a linked workspace package, so it can serve a stale build of one. That
+  is now avoided for `@dr/contracts` by the source alias above; if a _different_ linked
+  package is ever added, restart with `pnpm --filter @dr/web dev --force`.
 
 ### Database
 

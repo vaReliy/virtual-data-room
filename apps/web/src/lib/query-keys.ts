@@ -18,4 +18,15 @@ export const queryKeys = {
    * precisely what #24 removed.
    */
   browse: (roomId: string, nodeId?: string) => ['browse', roomId, nodeId ?? 'root'] as const,
+
+  /**
+   * `GET /api/rooms/:roomId/nodes/:nodeId/content` — a presigned GET that lives 300
+   * seconds.
+   *
+   * It has a key so that it can be *invalidated*, not so that it can be reused: the query
+   * that owns it sets `staleTime: 0` and `gcTime: 0`, because a URL cached for longer than
+   * it is valid is handed back dead, and the failure surfaces as a storage-provider XML
+   * document inside the preview frame (decision #15).
+   */
+  content: (roomId: string, nodeId: string) => ['content', roomId, nodeId] as const,
 } as const;

@@ -12,10 +12,20 @@
     "jsx": "react-jsx",
     // TS 6 no longer infers rootDir from `include` the way TS 5 did; every tsconfig in
     // this repo states it (see notes on the TypeScript pin).
-    "rootDir": ".",
+    // The repository root, not `apps/web`: the program legitimately spans two packages now
+    // that `@dr/contracts` is checked from source, and a `rootDir` under one of them makes
+    // the other "not under rootDir" (TS6059). Nothing is emitted from here — `noEmit` is
+    // on, Vite does the building — so `rootDir` only bounds what the checker will accept.
+    "rootDir": "../..",
     "types": ["vite/client", "node"],
-    // Mirrors the `@` alias in vite.config.ts. shadcn/ui generates imports in this form.
-    "paths": { "@/*": ["./src/*"] }
+    // Mirrors the aliases in vite.config.ts, and the second one is not cosmetic: without
+    // it TypeScript checks against `packages/contracts/dist/index.d.ts` while Vite bundles
+    // `src`, so a stale `dist` would let the two disagree about what the contracts export.
+    // Both must name the same file.
+    "paths": {
+      "@/*": ["./src/*"],
+      "@dr/contracts": ["../../packages/contracts/src/index.ts"]
+    }
   },
   "include": ["src", "vite.config.ts"]
 }

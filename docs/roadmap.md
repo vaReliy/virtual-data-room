@@ -382,16 +382,16 @@ Phase 3 turns that `<span>` into a `Link`.
       presign body and response, complete body, and the content response. S2 cannot begin
       against a shape that is still moving, which is why the whole contract reshape lands
       in S1 — the limits, these schemas, and nothing left for later
-- [ ] Dropzone: multiple files, **drag-and-drop**, per-file progress via `XMLHttpRequest`,
+- [x] Dropzone: multiple files, **drag-and-drop**, per-file progress via `XMLHttpRequest`,
       per-file error rows, cancel. **Native HTML5 DnD, no new dependency** — `DataTransfer`
       is the only way to read dropped files anyway, and `dnd-kit` handles pointer drags but
       not file drops, so a library would add a second mechanism rather than replace the
       first. Keyboard users are served by the "Move to…" dialog (decision #19), not by DnD.
       A cancelled transfer leaves a `PENDING` blob, which nothing collects — see Phase 6
-- [ ] PDF preview via `<iframe>`, content URL fetched with `staleTime: 0` / `gcTime: 0`
-- [ ] `NodeRoute` dispatches on `node.type` — `FILE` renders the preview, `FOLDER` the
+- [x] PDF preview via `<iframe>`, content URL fetched with `staleTime: 0` / `gcTime: 0`
+- [x] `NodeRoute` dispatches on `node.type` — `FILE` renders the preview, `FOLDER` the
       browser. Same route, no new one: the browse endpoint already answers for a file id
-- [ ] The deleted-**file** `410` screen, owed by Phase 2 and unscheduled until now
+- [x] The deleted-**file** `410` screen, owed by Phase 2 and unscheduled until now
       (`architecture.md` § `410` on both node types). It is a **second component, not a
       second destination**: the copy names a file, the link goes back to the Data Room
       root exactly as the folder screen's does. The `410` body carries a message but **not
@@ -399,17 +399,17 @@ Phase 3 turns that `<span>` into a `Link`.
       the file wording is reachable only when the
       reader arrived from the preview route with the type already in hand, and the folder
       screen is the fallback everywhere else
-- [ ] Rename file (`409` + dialog), delete file
+- [x] Rename file (`409` + dialog), delete file
 - [x] **`POST /:nodeId/move` — the endpoint, in S1.** Split out from the dialog below
       because it is the heaviest transaction in the phase and it belongs to the other
       session: `architecture.md` § Move covers the parent change, the descendant `path`
       rewrite and **both halves** of the aggregate transfer in one transaction, with cycle
       guard (`422`, not `409`), `409` on name conflict, and a live-`FOLDER` destination.
       Type-agnostic, so it serves files and folders from one repository method
-- [ ] The **"Move to…" dialog** with a folder picker, in S2 — the primary affordance per
+- [x] The **"Move to…" dialog** with a folder picker, in S2 — the primary affordance per
       decision #19, and the one that satisfies the brief on its own. UI only: the endpoint
       above is already done and tested when this starts
-- [ ] **Drag-and-drop move** between folders, alongside the "Move to…" dialog
+- [x] **Drag-and-drop move** between folders, alongside the "Move to…" dialog
 - [x] **Three integration tests** (decision #26), on the harness Phase 2 built:
       - `23505` on upload, asserting the retry re-runs the **whole** transaction
       - move cycle guard rejects a folder into its own descendant. `BRIEF.md` only

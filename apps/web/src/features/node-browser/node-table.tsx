@@ -1,3 +1,4 @@
+import { useState, type DragEvent } from 'react';
 import { Link } from 'react-router';
 import { File, Folder, MoreHorizontal } from 'lucide-react';
 import type { NodeSummary } from '@dr/contracts';
@@ -19,6 +20,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatBytes, formatTimestamp, pluralize } from '@/lib/formatters';
+import { NODE_DRAG_TYPE, carriesNode } from './node-drag';
 
 /**
  * A folder's own subtree totals, on the row.
@@ -49,13 +51,48 @@ export function NodeTable({
   canWrite,
   onRename,
   onDelete,
+  onMove,
+  onDropMove,
 }: {
   roomId: string;
   nodes: NodeSummary[];
   canWrite: boolean;
   onRename: (node: NodeSummary) => void;
   onDelete: (node: NodeSummary) => void;
+  onMove: (node: NodeSummary) => void;
+  onDropMove: (source: NodeSummary, destination: NodeSummary) => void;
 }) {
+  /**
+   * The node being dragged, and the folder row currently under it.
+   *
+   * The dragged node is held in state rather than read from the `DataTransfer`, because
+   * `getData()` is unreadable during `dragover` — the browser's drag protection mode
+   * exposes only `types` until the drop. `types` is enough to know *that* a node is being
+   * dragged (see `NODE_DRAG_TYPE`); this is how the row also knows *which*, so a folder can
+   * refuse to be dropped onto itself.
+   */
+  const [dragging, setDragging] = useState<NodeSummary | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  /**
+   * A folder row accepts a node drop when a node is being dragged and it is not that node.
+   *
+   * **Only files are draggable in this phase**, so there is no cycle to guard against here
+   * — and the server guards it anyway (`422`, not `409`), which is where a guard belongs
+   * when `curl` exists.
+   */
+  function accepts(folder: NodeSummary, event: DragEvent): boolean {
+    return (
+      canWrite &&
+      folder.type === 'FOLDER' &&
+      carriesNode(event.dataTransfer) &&
+      dragging !== null &&
+      dragging.id !== folder.id &&
+      // Already there: the move would be a no-op or a `409` against the row itself.
+      dragging.parentId !== folder.id
+    );
+  }
+
   return (
     <div className="overflow-x-auto rounded-lg border">
       <Table>
@@ -72,74 +109,138 @@ export function NodeTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {nodes.map((node) => (
-            <TableRow key={node.id}>
-              <TableCell className="font-medium">
-                <div className="flex items-center gap-2">
-                  {node.type === 'FOLDER' ? (
-                    <Folder className="size-4 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <File className="size-4 shrink-0 text-muted-foreground" />
-                  )}
-                  {node.type === 'FOLDER' ? (
+          {nodes.map((node) => {
+            // Files only. A folder-move UI is out of scope for this phase — the endpoint is
+            // type-agnostic and would serve it, but `BRIEF.md` asks for moving a file and
+            // the cycle guard is covered by a test rather than by a screen.
+            const draggable = canWrite && node.type === 'FILE';
+            return (
+              <TableRow
+                key={node.id}
+                draggable={draggable}
+                onDragStart={
+                  draggable
+                    ? (event) => {
+                        event.dataTransfer.setData(NODE_DRAG_TYPE, node.id);
+                        event.dataTransfer.effectAllowed = 'move';
+                        setDragging(node);
+                      }
+                    : undefined
+                }
+                onDragEnd={() => {
+                  setDragging(null);
+                  setDropTarget(null);
+                }}
+                onDragOver={(event) => {
+                  if (!accepts(node, event)) return;
+                  // Without `preventDefault` on *both* dragover and drop the browser
+                  // treats the row as not a drop target at all, and the drag snaps back.
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                  setDropTarget(node.id);
+                }}
+                onDragLeave={() => {
+                  setDropTarget((current) => (current === node.id ? null : current));
+                }}
+                onDrop={(event) => {
+                  if (!accepts(node, event)) return;
+                  event.preventDefault();
+                  const source = dragging;
+                  setDropTarget(null);
+                  setDragging(null);
+                  if (source) onDropMove(source, node);
+                }}
+                className={
+                  dropTarget === node.id
+                    ? 'bg-primary/10 outline outline-2 -outline-offset-2 outline-primary'
+                    : dragging?.id === node.id
+                      ? 'opacity-50'
+                      : undefined
+                }
+              >
+                <TableCell className="font-medium">
+                  <div className="flex items-center gap-2">
+                    {node.type === 'FOLDER' ? (
+                      <Folder className="size-4 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <File className="size-4 shrink-0 text-muted-foreground" />
+                    )}
                     <Link
                       to={`/rooms/${roomId}/n/${node.id}`}
+                      // The row already knows what it is, and the `410` body does not carry
+                      // a type. Handing the type along in navigation state is what lets the
+                      // preview show "this file was deleted" instead of the folder wording
+                      // when the reader clicks a row that has just gone.
+                      state={{ nodeType: node.type }}
+                      // An anchor is draggable by default and would start a *link* drag —
+                      // a URL, not a node — from the one part of the row a user is most
+                      // likely to grab. Refusing it here hands the drag to the row.
+                      draggable={false}
                       className="truncate underline-offset-4 hover:underline"
                     >
                       {node.name}
                     </Link>
-                  ) : (
-                    // No file can exist in this phase, and a file has no screen to open
-                    // until Phase 3 builds the preview. A row that navigates nowhere is
-                    // better than a link that looks live and is not.
-                    <span className="truncate">{node.name}</span>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell className="hidden text-muted-foreground sm:table-cell">
-                {contentsOf(node)}
-              </TableCell>
-              <TableCell className="hidden text-muted-foreground tabular-nums sm:table-cell">
-                {sizeOf(node)}
-              </TableCell>
-              <TableCell className="hidden text-muted-foreground md:table-cell">
-                {formatTimestamp(node.updatedAt)}
-              </TableCell>
-              <TableCell>
-                {/*
-                  Hidden behind `role`, and that is presentation only: the service asserts
-                  `scope.role === 'OWNER'` as the first line of every mutation and refuses
-                  with `404` (decision #25). `curl` does not read the UI.
-                */}
-                {canWrite ? (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" aria-label={`Actions for ${node.name}`}>
-                        <MoreHorizontal />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        onSelect={() => {
-                          onRename(node);
-                        }}
-                      >
-                        Rename
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onSelect={() => {
-                          onDelete(node);
-                        }}
-                      >
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                ) : null}
-              </TableCell>
-            </TableRow>
-          ))}
+                  </div>
+                </TableCell>
+                <TableCell className="hidden text-muted-foreground sm:table-cell">
+                  {contentsOf(node)}
+                </TableCell>
+                <TableCell className="hidden text-muted-foreground tabular-nums sm:table-cell">
+                  {sizeOf(node)}
+                </TableCell>
+                <TableCell className="hidden text-muted-foreground md:table-cell">
+                  {formatTimestamp(node.updatedAt)}
+                </TableCell>
+                <TableCell>
+                  {/*
+                    Hidden behind `role`, and that is presentation only: the service asserts
+                    `scope.role === 'OWNER'` as the first line of every mutation and refuses
+                    with `404` (decision #25). `curl` does not read the UI.
+                  */}
+                  {canWrite ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" aria-label={`Actions for ${node.name}`}>
+                          <MoreHorizontal />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            onRename(node);
+                          }}
+                        >
+                          Rename
+                        </DropdownMenuItem>
+                        {/*
+                          The primary move affordance (decision #19): reachable by keyboard,
+                          announced by a screen reader, and the one that satisfies the brief
+                          on its own. Dragging the row is the convenience on top of it.
+                        */}
+                        {node.type === 'FILE' ? (
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              onMove(node);
+                            }}
+                          >
+                            Move to…
+                          </DropdownMenuItem>
+                        ) : null}
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={() => {
+                            onDelete(node);
+                          }}
+                        >
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : null}
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </div>

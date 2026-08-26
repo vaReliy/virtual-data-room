@@ -31,6 +31,20 @@ import { SESSION_TTL_SECONDS } from './session';
   ],
   controllers: [AuthController, MeController],
   providers: [AuthService, GoogleStrategy, JwtStrategy, JwtAuthGuard],
-  exports: [AuthService, JwtAuthGuard],
+  /**
+   * **`JwtModule` is exported, and that is not tidiness — the guard does not work without
+   * it.** A guard named in `@UseGuards()` is constructed in the module that declares the
+   * *controller*, not in the module that provides the guard, so exporting `JwtAuthGuard`
+   * alone is not enough: its `JwtService` has to be resolvable in `NodeModule` and
+   * `FileModule` too.
+   *
+   * Missing, the guard is built with `jwt` undefined and every guarded request outside this
+   * module answers `500` — but only once the session passes
+   * `SESSION_REISSUE_AFTER_SECONDS`, because `reissueIfStale` returns before touching
+   * `this.jwt` until then. That delay is why it survived a full manual walk of the app:
+   * a fresh login never reaches the branch. `ConfigService` hides the symptom further by
+   * resolving anyway — `ConfigModule` is global.
+   */
+  exports: [AuthService, JwtAuthGuard, JwtModule],
 })
 export class AuthModule {}

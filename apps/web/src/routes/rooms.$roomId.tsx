@@ -1,7 +1,7 @@
 import { useParams } from 'react-router';
 
-import { NodeBrowser } from '@/features/node-browser/node-browser';
 import { NodeNotFoundState } from '@/features/node-browser/browser-states';
+import { NodeView } from '@/features/node-browser/node-view';
 
 /**
  * The Data Room root. No `nodeId`, so the browse endpoint answers with `node: null`, an
@@ -20,5 +20,5 @@ export function RoomRoute() {
   const { roomId } = useParams<{ roomId: string }>();
   if (!roomId) return <NodeNotFoundState roomId="" />;
 
-  return <NodeBrowser roomId={roomId} />;
+  return <NodeView roomId={roomId} />;
 }

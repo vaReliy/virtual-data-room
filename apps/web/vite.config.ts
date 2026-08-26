@@ -24,16 +24,28 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      /**
+       * **The web app consumes the contracts as TypeScript source, not as `dist`** —
+       * decision #12's actual wording, which the package's `main` alone does not deliver.
+       *
+       * Without this alias the import resolves to `packages/contracts/dist/index.js`,
+       * which is CommonJS (the API is CJS and shares the package), so the dev server has
+       * to pre-bundle it through `optimizeDeps` or every named import fails with "does not
+       * provide an export named …". That pre-bundle is the problem: Vite keys its cache on
+       * the lockfile and this config, **not** on the contents of a linked package's `dist`,
+       * so rebuilding the contracts leaves a running dev server serving the previous
+       * build's exports. What that looks like is not an error — it is `undefined` for
+       * everything added since, which surfaced here as `NaN MB` in the upload hint while
+       * `presignUploadResponseSchema` was quietly `undefined` too.
+       *
+       * Pointing at the source removes all of it: no CJS interop, no pre-bundle, no `dist`
+       * in the loop, and an edit to a schema hot-reloads. `apps/api` is untouched and still
+       * consumes `dist`, which is what a Nest build needs.
+       */
+      '@dr/contracts': fileURLToPath(
+        new URL('../../packages/contracts/src/index.ts', import.meta.url),
+      ),
     },
-  },
-  optimizeDeps: {
-    // `@dr/contracts` compiles to CommonJS (it is consumed by the API too, and the API
-    // is CJS). A linked workspace dependency is not pre-bundled by default, so the dev
-    // server would serve that CJS file as raw ESM and every named import from it fails
-    // with "does not provide an export named ...". The production build is unaffected —
-    // the bundler applies CJS interop there — which is exactly why this only shows up
-    // when the dev server is actually opened in a browser.
-    include: ['@dr/contracts'],
   },
   server: {
     host: true,

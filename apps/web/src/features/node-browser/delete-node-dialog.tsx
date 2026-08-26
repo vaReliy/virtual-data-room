@@ -14,16 +14,21 @@ import { ApiError, NetworkError } from '@/lib/api-client';
 import { formatBytes, pluralize } from '@/lib/formatters';
 
 /**
- * What is about to be lost, in the numbers the row already carries.
+ * What is about to be lost **inside a folder**, in the numbers the row already carries.
  *
  * These are the denormalized subtree aggregates maintained on every mutation
  * (decision #5), not a count of the visible children — deleting a folder deletes its
  * whole subtree, and a warning that counted only one level would understate it by
  * however deep the tree goes. They cost nothing to read, which is why the warning can be
  * rendered *before* the request rather than reported after it.
+ *
+ * A file returns `null` and gets its own sentence below. It has nothing inside it, and the
+ * folder wording — "this also deletes everything inside it — 585 B" — reads as nonsense on
+ * one document. That only became visible when there were files to delete: Phase 2 built
+ * this dialog with no file in the system to point it at.
  */
 function describeContents(node: NodeSummary): string | null {
-  if (node.type === 'FILE') return formatBytes(node.size);
+  if (node.type === 'FILE') return null;
   if (node.fileCount === 0 && node.folderCount === 0) return null;
 
   const parts = [];
@@ -97,7 +102,9 @@ export function DeleteNodeDialog({
           <DialogDescription>
             {contents
               ? `This also deletes everything inside it — ${contents}. This cannot be undone.`
-              : 'This cannot be undone.'}
+              : node.type === 'FILE'
+                ? `This file is ${formatBytes(node.size)}. This cannot be undone.`
+                : 'This cannot be undone.'}
           </DialogDescription>
         </DialogHeader>
 

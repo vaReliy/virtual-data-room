@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { FolderOpen, FolderX, SearchX } from 'lucide-react';
+import { FileX, FolderOpen, FolderX, SearchX } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 
@@ -46,6 +46,34 @@ export function DeletedFolderState({ roomId }: { roomId: string }) {
       icon={<FolderX className="size-5 text-muted-foreground" />}
       title="This folder was deleted by the owner"
       detail="It is no longer part of this Data Room, and its contents went with it."
+      action={
+        <Button asChild variant="outline" size="sm">
+          <Link to={`/rooms/${roomId}`}>Back to the Data Room</Link>
+        </Button>
+      }
+    />
+  );
+}
+
+/**
+ * `410 Gone` for a **file**, owed since Phase 2 and built now that there are files.
+ *
+ * It is a second component, not a second destination: the copy names a file, and the link
+ * goes back to the Data Room root exactly as the folder screen's does. It deliberately does
+ * **not** link to the folder that held the file — a `410` carries a message but no node, so
+ * on a direct load the client knows neither the parent nor even that this was a file.
+ *
+ * Which is why this wording is reachable only when the reader arrived already holding the
+ * type: from a file row in the table, or from the preview they were reading when it was
+ * deleted. Everywhere else `DeletedFolderState` is the fallback, and inventing a type field
+ * on the error body to fix that would be adding to the contract to serve one sentence.
+ */
+export function DeletedFileState({ roomId }: { roomId: string }) {
+  return (
+    <Placard
+      icon={<FileX className="size-5 text-muted-foreground" />}
+      title="This file was deleted by the owner"
+      detail="It is no longer part of this Data Room."
       action={
         <Button asChild variant="outline" size="sm">
           <Link to={`/rooms/${roomId}`}>Back to the Data Room</Link>
