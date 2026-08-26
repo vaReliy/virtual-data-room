@@ -23,6 +23,21 @@ export const envSchema = z.object({
   // 32 bytes minimum: this signs the session JWT.
   SESSION_SECRET: z.string().min(32),
 
+  /**
+   * How many reverse proxies sit in front of this process, for Express's `trust proxy`.
+   *
+   * It exists for exactly one reader — the anonymous share surface's rate limit, which is
+   * keyed on `req.ip` — and it is a **deployment fact rather than a preference**, which is
+   * why it is an environment variable and not a constant. Too high and a caller can spoof
+   * `X-Forwarded-For` past the limit; too low and every caller collapses into one bucket,
+   * which is the failure `session-throttler.guard.ts` documents.
+   *
+   * `0` — no trust — is the default because it is the safe direction: a shared bucket
+   * limits too much, a spoofable one limits nothing. Locally it is also correct, since
+   * Vite's proxy adds no forwarding header.
+   */
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
+
   STORAGE_ENDPOINT: z.url(),
   STORAGE_REGION: z.string().min(1),
   STORAGE_BUCKET: z.string().min(1),

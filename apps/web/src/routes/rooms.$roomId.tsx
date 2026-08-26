@@ -1,7 +1,9 @@
+import { useMemo } from 'react';
 import { useParams } from 'react-router';
 
 import { NodeNotFoundState } from '@/features/node-browser/browser-states';
 import { NodeView } from '@/features/node-browser/node-view';
+import { roomSource } from '@/lib/node-source';
 
 /**
  * The Data Room root. No `nodeId`, so the browse endpoint answers with `node: null`, an
@@ -18,7 +20,12 @@ import { NodeView } from '@/features/node-browser/node-view';
  */
 export function RoomRoute() {
   const { roomId } = useParams<{ roomId: string }>();
-  if (!roomId) return <NodeNotFoundState roomId="" />;
+  // Memoized because the source is a hook dependency all the way down — the upload
+  // queue's `enqueue` is rebuilt from it — and a fresh object every render would rebuild
+  // that callback on every render for no reason.
+  const source = useMemo(() => (roomId ? roomSource(roomId) : null), [roomId]);
 
-  return <NodeView roomId={roomId} />;
+  if (!source) return <NodeNotFoundState source={null} />;
+
+  return <NodeView source={source} />;
 }

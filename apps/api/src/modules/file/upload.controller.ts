@@ -24,7 +24,7 @@ import type { Request, Response } from 'express';
 
 import { AccessControlService } from '../../access/access-control.service';
 import { SessionThrottlerGuard } from '../../common/session-throttler.guard';
-import { PRESIGN_THROTTLER } from '../../common/throttler.config';
+import { PRESIGN_THROTTLER, PUBLIC_SHARE_THROTTLER } from '../../common/throttler.config';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { SessionContext } from '../auth/session';
@@ -40,9 +40,16 @@ type AuthenticatedRequest = Request & { user?: SessionContext };
  * must be named first: it is what populates `req.user` for `SessionThrottlerGuard` to key
  * on. Registering the throttler globally as an `APP_GUARD` would run it *before* any
  * authentication and give every caller the same tracker.
+ *
+ * The controller-wide `@SkipThrottle` is the other half of that property. One options array
+ * holds every named bucket in this application (`throttler.config.ts` says why it has to),
+ * and a `ThrottlerGuard` enforces **all** of them — so without this line presign would also
+ * count against the anonymous share bucket, spending a limit that exists to bound requests
+ * from callers with no account at all.
  */
 @Controller('rooms/:roomId/uploads')
 @UseGuards(JwtAuthGuard, SessionThrottlerGuard)
+@SkipThrottle({ [PUBLIC_SHARE_THROTTLER]: true })
 export class UploadController {
   constructor(
     private readonly accessControl: AccessControlService,

@@ -7,6 +7,8 @@ import { NotFoundRoute } from '@/routes/not-found';
 import { PrivacyRoute } from '@/routes/privacy';
 import { NodeRoute } from '@/routes/rooms.$roomId.n.$nodeId';
 import { RoomRoute } from '@/routes/rooms.$roomId';
+import { SharedNodeRootRoute } from '@/routes/s.$token';
+import { SharedNodeRoute } from '@/routes/s.$token.n.$nodeId';
 import { TermsRoute } from '@/routes/terms';
 
 /**
@@ -16,11 +18,18 @@ import { TermsRoute } from '@/routes/terms';
  * `/privacy` and `/terms` sit outside it for a different reason: they are the links
  * registered on the Google Auth Platform Branding page, and they must resolve for a
  * signed-out visitor.
+ *
+ * `/s/:token` is outside it for the strongest reason of the three. A share recipient has
+ * no account, so the gate would bounce them to `/login` — and signing in would not help
+ * them: the token is the authorization, and it grants nothing to a session. Putting these
+ * two routes behind the gate would make every share link a sign-in prompt.
  */
 export const router = createBrowserRouter([
   { path: '/login', Component: LoginRoute },
   { path: '/privacy', Component: PrivacyRoute },
   { path: '/terms', Component: TermsRoute },
+  { path: '/s/:token', Component: SharedNodeRootRoute },
+  { path: '/s/:token/n/:nodeId', Component: SharedNodeRoute },
   {
     Component: SessionGate,
     children: [

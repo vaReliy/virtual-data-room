@@ -10,6 +10,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb';
+import { nodeLink, rootLink, type NodeSource } from '@/lib/node-source';
 
 /**
  * The ancestry, rendered exactly as the API sent it.
@@ -26,12 +27,12 @@ import {
  * name sits above their scope (decision #24).
  */
 export function NodeBreadcrumbs({
-  roomId,
+  source,
   rootLabel,
   trail,
   current,
 }: {
-  roomId: string;
+  source: NodeSource;
   rootLabel: string;
   trail: Crumb[];
   current: string | null;
@@ -44,7 +45,7 @@ export function NodeBreadcrumbs({
             <BreadcrumbPage>{rootLabel}</BreadcrumbPage>
           ) : (
             <BreadcrumbLink asChild>
-              <Link to={`/rooms/${roomId}`}>{rootLabel}</Link>
+              <Link to={rootLink(source)}>{rootLabel}</Link>
             </BreadcrumbLink>
           )}
         </BreadcrumbItem>
@@ -54,7 +55,7 @@ export function NodeBreadcrumbs({
             <BreadcrumbSeparator />
             <BreadcrumbItem>
               <BreadcrumbLink asChild>
-                <Link to={`/rooms/${roomId}/n/${crumb.id}`}>{crumb.name}</Link>
+                <Link to={nodeLink(source, crumb.id)}>{crumb.name}</Link>
               </BreadcrumbLink>
             </BreadcrumbItem>
           </Fragment>

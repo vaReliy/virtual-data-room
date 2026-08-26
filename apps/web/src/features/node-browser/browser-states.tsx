@@ -1,7 +1,24 @@
 import { Link } from 'react-router';
-import { FileX, FolderOpen, FolderX, SearchX } from 'lucide-react';
+import { FileX, FolderOpen, FolderX, LinkIcon, SearchX } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { rootLink, type NodeSource } from '@/lib/node-source';
+
+/**
+ * "Back to where this reader started", which is not the same place for both readers: a
+ * signed-in one goes to their Data Room, a link recipient to the share root. The wording
+ * differs with it — a visitor holding a link has never heard of "the Data Room", and the
+ * phrase would name something they cannot reach.
+ */
+function BackAction({ source }: { source: NodeSource }) {
+  return (
+    <Button asChild variant="outline" size="sm">
+      <Link to={rootLink(source)}>
+        {source.kind === 'room' ? 'Back to the Data Room' : 'Back to the shared folder'}
+      </Link>
+    </Button>
+  );
+}
 
 function Placard({
   icon,
@@ -40,17 +57,17 @@ function Placard({
  * It fires only for a caller *inside* the deleted folder. A deleted child simply stops
  * appearing in its parent's next listing; that is not an error and has no screen.
  */
-export function DeletedFolderState({ roomId }: { roomId: string }) {
+export function DeletedFolderState({ source }: { source: NodeSource }) {
   return (
     <Placard
       icon={<FolderX className="size-5 text-muted-foreground" />}
       title="This folder was deleted by the owner"
-      detail="It is no longer part of this Data Room, and its contents went with it."
-      action={
-        <Button asChild variant="outline" size="sm">
-          <Link to={`/rooms/${roomId}`}>Back to the Data Room</Link>
-        </Button>
+      detail={
+        source.kind === 'room'
+          ? 'It is no longer part of this Data Room, and its contents went with it.'
+          : 'It is no longer part of what was shared with you, and its contents went with it.'
       }
+      action={<BackAction source={source} />}
     />
   );
 }
@@ -68,17 +85,17 @@ export function DeletedFolderState({ roomId }: { roomId: string }) {
  * deleted. Everywhere else `DeletedFolderState` is the fallback, and inventing a type field
  * on the error body to fix that would be adding to the contract to serve one sentence.
  */
-export function DeletedFileState({ roomId }: { roomId: string }) {
+export function DeletedFileState({ source }: { source: NodeSource }) {
   return (
     <Placard
       icon={<FileX className="size-5 text-muted-foreground" />}
       title="This file was deleted by the owner"
-      detail="It is no longer part of this Data Room."
-      action={
-        <Button asChild variant="outline" size="sm">
-          <Link to={`/rooms/${roomId}`}>Back to the Data Room</Link>
-        </Button>
+      detail={
+        source.kind === 'room'
+          ? 'It is no longer part of this Data Room.'
+          : 'It is no longer part of what was shared with you.'
       }
+      action={<BackAction source={source} />}
     />
   );
 }
@@ -88,17 +105,45 @@ export function DeletedFileState({ roomId }: { roomId: string }) {
  * indistinguishable: a `403` here would confirm that a document exists, which in a
  * due-diligence context is itself the information worth protecting.
  */
-export function NodeNotFoundState({ roomId }: { roomId: string }) {
+export function NodeNotFoundState({ source }: { source: NodeSource | null }) {
   return (
     <Placard
       icon={<SearchX className="size-5 text-muted-foreground" />}
       title="Not found"
       detail="This item does not exist, or it is not shared with you."
-      action={
-        <Button asChild variant="outline" size="sm">
-          <Link to={`/rooms/${roomId}`}>Back to the Data Room</Link>
-        </Button>
-      }
+      // `null` is a malformed URL — no room id, no token — so there is nowhere to send
+      // the reader back to. A link to `/rooms/` or `/s/` would be a second 404.
+      action={source ? <BackAction source={source} /> : undefined}
+    />
+  );
+}
+
+/**
+ * `410 Gone` at the root of a share link — and it covers **four** causes, not three.
+ *
+ * Three come from the token: unknown, revoked, expired, which the API deliberately answers
+ * alike. The token space is 256 bits, so nobody reaches an unknown one by guessing; they
+ * reach it with a link that was truncated, mistyped, or killed.
+ *
+ * The fourth is the owner deleting the shared node itself while the link stays live —
+ * `BRIEF.md`'s "deleting a folder that is being viewed by someone it was shared with".
+ * The server answers that with the same `410` (a live token whose scope root is stamped),
+ * and a `410` carries a message and no node, so the client **cannot** tell it from a dead
+ * token. The copy therefore names all four rather than asserting the likeliest one:
+ * telling a visitor their link was revoked when the folder was actually deleted would send
+ * them back to the sender for a replacement that cannot exist.
+ *
+ * **A dead end with no way out, and that is the honest shape.** There is no link and no
+ * sign-in button: an anonymous visitor has nowhere in this application to go, and signing
+ * in would not grant them access — offering it would be a dead end dressed as an exit.
+ * The one action that helps is asking whoever sent the link, which the copy says.
+ */
+export function DeadLinkState() {
+  return (
+    <Placard
+      icon={<LinkIcon className="size-5 text-muted-foreground" />}
+      title="This link is no longer available"
+      detail="It may have been revoked or expired, or the shared item may have been deleted by its owner. Ask whoever sent it to you for a new one."
     />
   );
 }

@@ -118,8 +118,21 @@ jobs:
           STORAGE_ENDPOINT: ${{ vars.STORAGE_ENDPOINT }}
           STORAGE_REGION: ${{ vars.STORAGE_REGION }}
           STORAGE_BUCKET: ${{ vars.STORAGE_BUCKET }}
+          # Optional, and deliberately not in the "Check configuration" list above: its
+          # default is the *safe* direction, so an unset variable must not fail a deploy.
+          # See the comment beside --set-env-vars for what it does.
+          TRUST_PROXY_HOPS: ${{ vars.TRUST_PROXY_HOPS }}
         run: |
           set -euo pipefail
+
+          # How many proxies sit in front of this service, for Express `trust proxy`. Read
+          # by one thing only: the per-IP rate limit on the anonymous share surface.
+          # `0` — trust nothing — is the default because it is the safe failure: a shared
+          # bucket limits too much, while trusting more hops than really exist makes
+          # X-Forwarded-For spoofable and the limit vacuous. The real value is a property
+          # of the deployed chain and must be *observed* from the service's own log, never
+          # guessed (notes issue 13).
+          trust_proxy_hops="${TRUST_PROXY_HOPS:-0}"
 
           # Derived, never configured separately. The callback URI is the single value
           # that must agree between this service, the Vercel rewrite and the Google OAuth
@@ -143,7 +156,7 @@ jobs:
             --min-instances=0 \
             --max-instances=3 \
             --timeout=60s \
-            --set-env-vars="NODE_ENV=production,APP_URL=${APP_URL},GOOGLE_CALLBACK_URL=${callback},GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID},STORAGE_ENDPOINT=${STORAGE_ENDPOINT},STORAGE_REGION=${STORAGE_REGION},STORAGE_BUCKET=${STORAGE_BUCKET}" \
+            --set-env-vars="NODE_ENV=production,APP_URL=${APP_URL},GOOGLE_CALLBACK_URL=${callback},GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID},STORAGE_ENDPOINT=${STORAGE_ENDPOINT},STORAGE_REGION=${STORAGE_REGION},STORAGE_BUCKET=${STORAGE_BUCKET},TRUST_PROXY_HOPS=${trust_proxy_hops}" \
             --set-secrets="DATABASE_URL=dataroom-database-url:latest,DIRECT_URL=dataroom-direct-url:latest,GOOGLE_CLIENT_SECRET=dataroom-google-client-secret:latest,SESSION_SECRET=dataroom-session-secret:latest,STORAGE_ACCESS_KEY_ID=dataroom-storage-access-key-id:latest,STORAGE_SECRET_ACCESS_KEY=dataroom-storage-secret-access-key:latest"
 
           url="$(gcloud run services describe "${SERVICE}" \

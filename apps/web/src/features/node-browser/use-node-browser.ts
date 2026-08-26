@@ -13,23 +13,13 @@ import {
 } from '@tanstack/react-query';
 
 import { apiFetch, apiNoContent, apiSend, isClientError } from '@/lib/api-client';
+import {
+  browsePath,
+  moveNodePath,
+  nodeMutationPath,
+  type NodeSource,
+} from '@/lib/node-source';
 import { queryKeys } from '@/lib/query-keys';
-
-/** `undefined` is the room root, which has no node row to address. */
-function browsePath(roomId: string, nodeId?: string, cursor?: string): `/api/${string}` {
-  const base = `/api/rooms/${roomId}/nodes${nodeId === undefined ? '' : `/${nodeId}`}`;
-  return (
-    cursor === undefined ? base : `${base}?cursor=${encodeURIComponent(cursor)}`
-  ) as `/api/${string}`;
-}
-
-function nodePath(roomId: string, nodeId: string): `/api/${string}` {
-  return `/api/rooms/${roomId}/nodes/${nodeId}`;
-}
-
-function movePath(roomId: string, nodeId: string): `/api/${string}` {
-  return `/api/rooms/${roomId}/nodes/${nodeId}/move`;
-}
 
 export type BrowseQuery = UseInfiniteQueryResult<
   InfiniteData<BrowseResponse, string | null>,
@@ -47,12 +37,17 @@ export type BrowseQuery = UseInfiniteQueryResult<
  *
  * A 4xx is never retried. Each one here is a settled answer with its own screen — `404`
  * not found, `410` deleted — and retrying it three times just delays that screen.
+ *
+ * **`source` rather than a room id**, so that the same query serves a signed-in reader and
+ * a link recipient (`node-source.ts`). It decides the path and the cache key together; a
+ * second copy of this hook for the public surface is how the two would drift apart, and
+ * it would also mean implementing Phase 4.1's `?sort=` twice.
  */
-export function useBrowse(roomId: string, nodeId?: string): BrowseQuery {
+export function useBrowse(source: NodeSource, nodeId?: string): BrowseQuery {
   return useInfiniteQuery({
-    queryKey: queryKeys.browse(roomId, nodeId),
+    queryKey: queryKeys.browse(source, nodeId),
     queryFn: ({ pageParam }) =>
-      apiFetch(browsePath(roomId, nodeId, pageParam ?? undefined), browseResponseSchema),
+      apiFetch(browsePath(source, nodeId, pageParam ?? undefined), browseResponseSchema),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     retry: (failureCount, error) => !isClientError(error) && failureCount < 2,
@@ -67,10 +62,10 @@ export function useBrowse(roomId: string, nodeId?: string): BrowseQuery {
  * query and refetch together. Invalidating the session query on a content mutation is the
  * coupling decision #24 removed.
  */
-function useInvalidateBrowse(roomId: string, nodeId?: string): () => Promise<void> {
+function useInvalidateBrowse(source: NodeSource, nodeId?: string): () => Promise<void> {
   const queryClient = useQueryClient();
   return async () => {
-    await queryClient.invalidateQueries({ queryKey: queryKeys.browse(roomId, nodeId) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.browse(source, nodeId) });
   };
 }
 
@@ -78,22 +73,28 @@ function useInvalidateBrowse(roomId: string, nodeId?: string): () => Promise<voi
  * Creates a folder in the location currently on screen. `parentId` is `null` at the room
  * root — the API reads that as the caller's scope root, which is not always the room's
  * (a subtree share resolves elsewhere), so the client never tries to name it itself.
+ *
+ * **The four mutations below take a `source` they can only ever be given a room for.** A
+ * link recipient resolves to a `VIEWER` scope, so every control that reaches them is
+ * hidden on `role` and the service would answer `404` anyway; the path builders throw
+ * before a request leaves the browser rather than sending a token somewhere it does not
+ * belong (`node-source.ts`).
  */
-export function useCreateFolder(roomId: string, nodeId?: string) {
-  const invalidate = useInvalidateBrowse(roomId, nodeId);
+export function useCreateFolder(source: NodeSource, nodeId?: string) {
+  const invalidate = useInvalidateBrowse(source, nodeId);
   return useMutation<NodeSummary, Error, string>({
     mutationFn: (name) =>
-      apiSend(browsePath(roomId), nodeSummarySchema, 'POST', { parentId: nodeId ?? null, name }),
+      apiSend(browsePath(source), nodeSummarySchema, 'POST', { parentId: nodeId ?? null, name }),
     onSuccess: invalidate,
   });
 }
 
 /** Renames a child of the location on screen. `409` reaches the dialog with its status. */
-export function useRenameNode(roomId: string, nodeId?: string) {
-  const invalidate = useInvalidateBrowse(roomId, nodeId);
+export function useRenameNode(source: NodeSource, nodeId?: string) {
+  const invalidate = useInvalidateBrowse(source, nodeId);
   return useMutation<NodeSummary, Error, { id: string; name: string }>({
     mutationFn: ({ id, name }) =>
-      apiSend(nodePath(roomId, id), nodeSummarySchema, 'PATCH', { name }),
+      apiSend(nodeMutationPath(source, id), nodeSummarySchema, 'PATCH', { name }),
     onSuccess: invalidate,
   });
 }
@@ -111,16 +112,16 @@ export function useRenameNode(roomId: string, nodeId?: string) {
  * move deliberately does not auto-suffix (decision #20) — the user chose the destination
  * knowing what was in it.
  */
-export function useMoveNode(roomId: string, nodeId?: string) {
+export function useMoveNode(source: NodeSource, nodeId?: string) {
   const queryClient = useQueryClient();
   return useMutation<NodeSummary, Error, { id: string; parentId: string | null }>({
     mutationFn: ({ id, parentId }) =>
-      apiSend(movePath(roomId, id), nodeSummarySchema, 'POST', { parentId }),
+      apiSend(moveNodePath(source, id), nodeSummarySchema, 'POST', { parentId }),
     onSuccess: async (_node, { parentId }) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.browse(roomId, nodeId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.browse(source, nodeId) }),
         queryClient.invalidateQueries({
-          queryKey: queryKeys.browse(roomId, parentId ?? undefined),
+          queryKey: queryKeys.browse(source, parentId ?? undefined),
         }),
       ]);
     },
@@ -132,10 +133,10 @@ export function useMoveNode(roomId: string, nodeId?: string) {
  * warning the user just confirmed was rendered from the folder's own aggregates, which
  * the invalidation then refreshes along with the row disappearing.
  */
-export function useDeleteNode(roomId: string, nodeId?: string) {
-  const invalidate = useInvalidateBrowse(roomId, nodeId);
+export function useDeleteNode(source: NodeSource, nodeId?: string) {
+  const invalidate = useInvalidateBrowse(source, nodeId);
   return useMutation<void, Error, string>({
-    mutationFn: (id) => apiNoContent(nodePath(roomId, id), 'DELETE'),
+    mutationFn: (id) => apiNoContent(nodeMutationPath(source, id), 'DELETE'),
     onSuccess: invalidate,
   });
 }

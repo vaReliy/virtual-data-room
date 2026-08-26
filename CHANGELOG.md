@@ -9,6 +9,71 @@ otherwise see.
 
 ## [Unreleased]
 
+### Added — Sharing: the public link surface (Phase 4, issue 07)
+
+- **`TRUST_PROXY_HOPS` is a new environment variable, and removing it silently breaks a
+  security control.** `main.ts` feeds it to Express `trust proxy`, and exactly one thing
+  reads the result: the per-IP rate limit on `/api/s/:token`, the only route with no
+  session to key on. Behind the Vercel rewrite and Cloud Run, an untrusted chain makes
+  `req.ip` the proxy's address for **every** caller, so the limit becomes one shared bucket
+  for the whole deployment — it still responds, still counts, and is wrong. Trusting more
+  hops than really sit in front of the service is the opposite failure: `X-Forwarded-For`
+  becomes spoofable and the limit stops applying. It is a deployment fact, not a default,
+  which is why it is an environment variable. **It ships at `0` and the deployed value has
+  not been observed yet** — `ClientIpThrottlerGuard` logs the first anonymous request's
+  `req.ip` and raw header once per process for exactly that purpose. Nothing else in the
+  codebase reads `req.ip`, so the blast radius of a wrong value is this limit alone.
+- **One throttler options array now holds every named bucket, and that is forced.**
+  `ThrottlerModule` is `@Global()` and `forRoot` provides `THROTTLER_OPTIONS`, so two
+  arrays would be two providers racing for one token and the loser would silently take the
+  other's limits. `FileModule` and `ShareModule` are handed the *same* array. The price is
+  that a `ThrottlerGuard` enforces **every** bucket in the options, so each controller
+  carries a `@SkipThrottle` for the one that is not its own — without them a share visitor
+  would spend the upload allowance, tracked by a guard that throws when there is no
+  session. `common/throttler.config.test.ts` is the experiment kept as a regression guard.
+- **The public controller writes no new listing code.** `resolveForToken` produces the
+  scope and the existing `NodeService.browse` and `ContentService.urlFor` do the rest, so
+  `browseResponseSchema` travels verbatim — `room` omitted, `parentId` nulled at the scope
+  root, breadcrumbs clipped server-side. A public twin of the DTO is how the two drift, and
+  it would mean implementing Phase 4.1's `?sort=` twice. Read-only is structural, not
+  disciplinary: the scope's `role` is `VIEWER` and every mutation starts with
+  `assertMayWrite`.
+- **`NodeSource` replaces the `roomId` prop threaded through the whole browser** (`lib/
+  node-source.ts`). One value now decides the API path, the in-app link and the cache key
+  together. The cache key is the part that matters: the same node id can be legitimately
+  reachable both ways at once, and the two answers differ in `role`, in whether `room`
+  travels and in where the breadcrumbs are clipped — one shared key would hand a signed-out
+  visitor an owner's answer. A share is keyed on its token and never on a room id, which
+  the visitor does not have and must not be handed. The four write hooks take a source they
+  can only be given a room for; the path builders throw rather than send a token to an
+  endpoint that would refuse it.
+- **`/s/:token` sits outside `SessionGate`**, and must stay there. The gate redirects an
+  unauthenticated visitor to `/login`, and signing in grants a link recipient nothing —
+  putting these routes behind it would turn every share link into a sign-in prompt.
+- **The header wordmark is now a link to `/` in both shells**, and the line it walks is
+  worth keeping. What the anonymous surface must never offer is a *remedy* — a "Sign in to
+  view this" beside a dead link — because an account grants nothing there: the token is the
+  authorization. A wordmark is not a remedy; it is "go to the application", and without it
+  a reader who does have an account was stranded with no way into their own room. No
+  session branch was written for it and none is wanted: `/` resolves to the caller's room,
+  and `SessionGate` sends a signed-out caller to `/login` exactly as it does for any other
+  address. The dead-link placard itself stays actionless.
+- **Two different `410`s on one surface, told apart by position rather than by the body.**
+  At a share's root the token itself is dead; deeper in, a node was deleted. A `410`
+  carries a message and nothing else, and adding a field naming which case it was would be
+  a contract change to serve one sentence — so revoking a link under a visitor standing
+  deep inside it shows the deleted-node screen first and the truth one click later. The
+  dead-link screen deliberately offers **no** action of its own.
+- **Four situations answer `410` on `/s/:token` with one body**: unknown token, revoked,
+  expired, and a live token whose shared node the owner deleted. Do not add a field that
+  distinguishes them. A distinct answer for "never existed" turns probing into a progress
+  signal — feedback that the address space is being searched correctly — and an identical
+  answer denies it; the fourth case is additionally one the client *cannot* tell apart,
+  since a stamped scope root raises the same exception with no node in the body. The screen
+  therefore names all four causes rather than asserting the likeliest, which is `BRIEF.md`'s
+  "deleting a folder that is being viewed by someone it was shared with" answered honestly
+  without a contract change.
+
 ### Added — Sharing: shares written, and grants resolved (Phase 4, issue 06)
 
 - **A `LINK` share's URL is returned exactly once**, in the response to the call that

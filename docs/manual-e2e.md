@@ -617,9 +617,103 @@ current scope — the rule is enforced by the server and covered by an automated
 
 ### X-04 — Sharing surfaces **[phase 4+]**
 
-Share dialog, link and user shares, revocation, "Shared with me", and the public read-only
-surface. Not built; no cases written. When they arrive, a revoked link and a revoked user
-grant must give **different** answers, and the reasoning belongs with those cases.
+The share dialog, "Shared with me" and revocation from the owner's side are not built; no
+cases written. The public read-only surface is, and its cases are under **Share links**
+below. When the owner-side cases arrive, a revoked link and a revoked user grant must give
+**different** answers, and the reasoning belongs with those cases.
+
+---
+
+## Share links
+
+The one surface with no session at all. **Walk every case here in a private window**, or in
+a browser where this app has never been signed in: a stale session cookie makes an
+authenticated request pass for an anonymous one, and every case below would still appear to
+work while proving nothing.
+
+### LNK-01 — A live link opens what was shared, signed out **[state]**
+
+**Preconditions:** a `LINK` share of a folder; its URL; a private window.
+
+1. Open the URL.
+   - Expected: the shared folder's contents, in the ordinary browser, rooted at that folder.
+   - Expected: **no sign-in prompt and no redirect to the login screen.** The token is the
+     authorization; an account grants nothing here, so being *sent* to sign in would be a
+     dead end dressed as an exit.
+   - Expected: no avatar, no account name and no "Sign out" — and no "Sign in" call to
+     action anywhere on the page.
+   - Expected: the wordmark in the header **is** a link, to `/`. That is not the same
+     thing: it is "go to the application", not "sign in to see this document". Signed in,
+     it lands in the reader's own Data Room; signed out, the ordinary gate sends them to
+     the login screen — the same as any other address in this app.
+2. Look at the breadcrumbs and the heading.
+   - Expected: the trail starts at the shared folder. Nothing above it appears, and the
+     Data Room's own name appears nowhere — a folder name is confidential, and the
+     breadcrumb is the easiest place to leak one.
+3. Look for write affordances.
+   - Expected: no "New folder", no upload control, no rename, move or delete on any row.
+     Download stays, because reading is what a link grants.
+4. Descend into a subfolder and use the `..` row to climb back.
+   - Expected: it climbs, and it stops at the shared folder rather than offering a way
+     above it.
+
+### LNK-02 — A link to a single file previews it **[state]**
+
+**Preconditions:** a `LINK` share whose target is a file.
+
+1. Open the URL in a private window.
+   - Expected: the document renders in the preview, not a folder listing.
+2. Use Download.
+   - Expected: the file saves under its real name. Refusing it would be theatre — the
+     preview already served the same bytes.
+
+### LNK-03 — A revoked link says so, and offers nothing **[state]**
+
+**Preconditions:** a live `LINK` share open in a private window.
+
+1. Revoke the share as the owner (or mark it revoked directly, until the dialog ships).
+2. Reload the visitor's tab.
+   - Expected: "This link is no longer available", naming revocation, expiry **and** the
+     shared item having been deleted, and telling the reader to ask whoever sent it for a
+     new one. All four causes share one screen on purpose — see LNK-04.
+   - Expected: **the placard itself offers nothing** — no link, no button, no "Sign in".
+     A remedy beside a dead link would promise that an account grants access, which it
+     does not. The header wordmark stays a link, and that distinction is the point.
+   - Expected: not a crash, and not a redirect to the login screen.
+
+### LNK-04 — A link that never existed says the same thing **[state]**
+
+1. Open `/s/` followed by an invented token, in a private window.
+   - Expected: the identical "no longer available" screen.
+   - Rule: unknown, revoked, expired **and "the owner deleted the shared item"** are one
+     answer on purpose. Two reasons, and both matter. A distinct answer for "never existed"
+     would tell someone probing the address space that they are probing it correctly — a
+     progress signal, which an identical answer denies. And the fourth case is one the
+     client genuinely cannot tell apart: a live token whose shared node was deleted raises
+     the same `410`, with no node in the body to say so.
+   - Do not "improve" this by adding a field to the error body. It would trade a graded
+     security property for one sentence of copy.
+
+### LNK-05 — A node deleted inside a live link **[state]**
+
+**Preconditions:** a live folder link; the visitor standing in a subfolder of it.
+
+1. As the owner, delete that subfolder.
+2. Reload the visitor's tab.
+   - Expected: "this folder was deleted by the owner", worded for someone who has never
+     heard of the Data Room, with a way back to the **shared folder** — not to a room the
+     visitor cannot reach.
+
+### LNK-06 — The limit is per visitor, not per deployment
+
+**Preconditions:** a live link.
+
+1. Request the share root about forty times in quick succession.
+   - Expected: `429` after thirty.
+2. From a **different** machine or network, open the same link once.
+   - Expected: it still works. If it does not, `TRUST_PROXY_HOPS` is wrong for this
+     deployment and every caller is sharing one bucket — the failure this setting exists to
+     prevent, and one that never announces itself.
 
 ---
 

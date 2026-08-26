@@ -2,15 +2,7 @@ import { useState } from 'react';
 import { contentUrlResponseSchema, type NodeSummary } from '@dr/contracts';
 
 import { ApiError, apiFetch } from '@/lib/api-client';
-
-/**
- * The same endpoint the preview reads, with the one parameter that turns it into a save.
- * `attachment` is written into the signature by the server; it is not a request header the
- * browser could add afterwards.
- */
-function downloadPath(roomId: string, nodeId: string): `/api/${string}` {
-  return `/api/rooms/${roomId}/nodes/${nodeId}/content?disposition=attachment`;
-}
+import { contentPath, type NodeSource } from '@/lib/node-source';
 
 /**
  * Asks for a presigned GET signed `attachment` and navigates to it.
@@ -25,8 +17,13 @@ function downloadPath(roomId: string, nodeId: string): `/api/${string}` {
  * The navigation is `location.assign` rather than an anchor or a new tab: the response
  * carries `Content-Disposition: attachment`, so the browser saves it and leaves the page
  * exactly where it was. A `_blank` tab would flash open and close instead.
+ *
+ * **A link recipient downloads through the same code.** `ContentController` is not
+ * role-guarded and neither is its public twin: the preview already serves the same bytes,
+ * so refusing to sign them `attachment` would be theatre. Which endpoint gets asked is the
+ * `source`'s business and nothing else here changes.
  */
-export function useDownload(roomId: string): {
+export function useDownload(source: NodeSource): {
   /** Fire-and-forget: failures land in `failure`, not in a rejected promise. */
   download: (node: Pick<NodeSummary, 'id' | 'name'>) => void;
   /** The id currently being signed, so the row that was clicked can say so. */
@@ -40,7 +37,7 @@ export function useDownload(roomId: string): {
   function download(node: Pick<NodeSummary, 'id' | 'name'>): void {
     setFailure(null);
     setPendingId(node.id);
-    apiFetch(downloadPath(roomId, node.id), contentUrlResponseSchema)
+    apiFetch(contentPath(source, node.id, 'attachment'), contentUrlResponseSchema)
       .then(({ url }) => {
         window.location.assign(url);
       })

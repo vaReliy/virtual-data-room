@@ -7,6 +7,7 @@ import { InlineFailure } from '@/features/node-browser/inline-failure';
 import { NodeBreadcrumbs } from '@/features/node-browser/node-breadcrumbs';
 import { ErrorState } from '@/features/session/error-state';
 import { formatBytes, formatTimestamp } from '@/lib/formatters';
+import type { NodeSource } from '@/lib/node-source';
 import { useContentUrl } from './use-content-url';
 import { useDownload } from './use-download';
 
@@ -28,24 +29,24 @@ import { useDownload } from './use-download';
  * than being wired a second time on a screen whose job is to show the document.
  */
 export function FilePreview({
-  roomId,
+  source,
   node,
   breadcrumbs,
   rootLabel,
 }: {
-  roomId: string;
+  source: NodeSource;
   node: NodeSummary;
   breadcrumbs: Breadcrumb[];
   rootLabel: string;
 }) {
-  const content = useContentUrl(roomId, node.id);
-  const downloads = useDownload(roomId);
+  const content = useContentUrl(source, node.id);
+  const downloads = useDownload(source);
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6">
       <div className="space-y-2">
         <NodeBreadcrumbs
-          roomId={roomId}
+          source={source}
           rootLabel={rootLabel}
           trail={breadcrumbs}
           current={node.name}

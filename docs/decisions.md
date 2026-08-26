@@ -941,3 +941,54 @@ whole folder away, and neither party would see why.
   extra query.
 - Nothing in the model needs a "primary" or "effective" grant column: the rule is a total
   order over rows that already exist, evaluated per request.
+
+---
+
+## 30. What the anonymous share limit protects, and what it does not
+
+**Status:** Accepted, Phase 4 issue 07. Extends #26's presign limit to the one surface that
+has no session; contradicts nothing.
+
+**Context.** `/api/s/:token` is the only endpoint in the system with no session. There is no
+`userId` to key a limit on, and `SessionThrottlerGuard` cannot be reused: it throws
+deliberately when there is no session, because on the presign route a missing session means
+a broken guard chain. Here a missing session is the normal case. So the question was not
+"which key" but whether a limit belongs here at all, and if so what it is for — a limit
+whose purpose is stated wrongly gets tuned wrongly, and later gets removed by someone who
+noticed it did not do what its comment claimed.
+
+**Decision.**
+
+> Thirty requests per minute per **client IP**, in its own named bucket, registered on the
+> controller. Its stated purpose is bounding **unauthenticated database load** — and
+> nothing else. Express `trust proxy` is set from `TRUST_PROXY_HOPS`, because `req.ip` is
+> otherwise the proxy's address for every caller.
+
+**Rationale.** Every hit on `/s/:token` costs a SHA-256 plus at least two Neon queries, from
+a caller with no account and no other ceiling anywhere in the system. Without a limit, one
+script scraping one leaked link — or hammering with varied tokens — runs unbounded, and the
+first signal is the bill.
+
+**What it explicitly is not.** Both of these were considered and rejected as descriptions,
+not as features:
+
+- **Not protection against token guessing.** `randomBytes(32)` is 256 bits; guessing is
+  infeasible with or without a limit, and claiming otherwise would misrepresent what the
+  control does.
+- **Not DDoS protection.** A real flood is absorbed upstream, and `@nestjs/throttler`'s
+  default storage is in-process — on an autoscaling Cloud Run service the limit is
+  per-instance and approximate. Making it distributed would mean a shared store, which is
+  infrastructure this project does not have and does not need for the stated purpose.
+
+**Consequences.**
+
+- `TRUST_PROXY_HOPS` is a deployment fact, not a preference, and it fails silently in both
+  directions: too low collapses every caller into one bucket, too high makes
+  `X-Forwarded-For` spoofable and the limit vacuous. It ships at `0` — the safe direction —
+  and `ClientIpThrottlerGuard` logs the first anonymous request's `req.ip` and raw header
+  once per process so the deployed value is observed rather than guessed. Nothing else in
+  the codebase reads `req.ip`, so the blast radius of a wrong value is this limit alone.
+- One options array now holds every named bucket in the application. `ThrottlerModule` is
+  `@Global()`, so two arrays would be two providers racing for one token; the cost of one
+  array is that each controller must `@SkipThrottle` the bucket that is not its own, and
+  neither of those two lines is decoration.

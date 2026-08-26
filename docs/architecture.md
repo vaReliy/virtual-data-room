@@ -271,10 +271,11 @@ Deliberate status codes, because the frontend renders a different state for each
 |---|---|---|
 | Node does not exist, or is outside the caller's scope | `404` | "Not found" state |
 | Node was deleted while being viewed | `410 Gone` | "This item was deleted by the owner" |
-| Share link revoked or expired | `410 Gone` | "This link is no longer available" |
+| Share link revoked, expired, **or unknown** | `410 Gone` | "This link is no longer available" |
 | Name already taken on rename/move | `409 Conflict` | Inline conflict dialog |
 | Quota exceeded, file too large, wrong type | `422` | Per-file error in the upload queue |
 | Presign rate limit exceeded | `429` | Per-file error row; no automatic retry |
+| Anonymous share rate limit exceeded | `429` | The generic error state, with retry |
 | Signed in but lacking a grant | `404`, not `403` | Existence is information |
 
 Note that 404 rather than 403 is intentional for missing grants: a 403 would confirm
@@ -288,6 +289,61 @@ the grant row, and revoking it must return the grantee to the state the table ab
 already defines as `404`, "signed in but lacking a grant". A `410` there would tell a
 revoked grantee, permanently, that the document still exists — which is the one thing
 revocation is supposed to stop.
+
+**Four different situations answer `410` on `/s/:token`, with one body and one screen**, and
+collapsing them is a decision rather than an omission:
+
+1. the token never existed;
+2. the share was revoked;
+3. the share expired;
+4. the share is live, but the owner soft-deleted the node it points at.
+
+**Nothing in the response distinguishes them, and nothing may be added that does.** A `410`
+carries a message and no node — deliberately. Separating case 1 from cases 2 and 3 would
+tell a caller which tokens were ever real, which turns probing into a **progress signal**:
+a distinct answer for "never existed" is feedback that the address space is being searched
+correctly, and an identical answer for every failure denies it. The 256-bit token
+(`randomBytes(32)`) already makes a successful guess infeasible, and this keeps the failures
+uninformative as well, which is the property that survives a future change in how tokens are
+minted.
+
+Case 4 folds in for a second reason on top of that one: the client is *unable* to tell it
+apart at the share root, since a live token whose scope root is stamped raises the same
+`GoneException`. So the screen names all four causes rather than asserting the likeliest —
+telling a visitor their link was revoked when the folder was in fact deleted would send them
+back to the sender for a replacement that cannot exist. It is `BRIEF.md`'s "deleting a
+folder that is being viewed by someone it was shared with", answered honestly without a
+contract change.
+
+Deeper inside a live share the ordinary deleted-node screen still applies: there the client
+knows it asked about a node, so the `410` means the node.
+
+### The anonymous surface
+
+`/api/s/:token` (`public-share.controller.ts`) is the only route in the system with no
+session: the `JwtAuthGuard` chain does not apply, and the authorization is possession of
+the preimage of a live `LINK` share's `token_hash`. Everything it does past that point is
+bounded by the `AccessScope` `resolveForToken` produced, and it hands that scope to the
+same `NodeService.browse` and `ContentService.urlFor` the authenticated routes use — there
+is no second listing path, and the response is `browseResponseSchema` verbatim.
+
+It is read-only structurally rather than by discipline: the scope's `role` is `VIEWER`, and
+`NodeService.assertMayWrite` is the first statement of every mutation.
+
+Its rate limit is keyed on the **client IP**, since there is no user to key on.
+`SessionThrottlerGuard` cannot be reused — it throws when there is no session, by design.
+Two things about the limit are load-bearing and both fail silently:
+
+- **`TRUST_PROXY_HOPS` must match the deployment.** `req.ip` is the proxy's address for
+  every caller until Express is told to trust the forwarding chain, which turns a per-IP
+  bucket into one shared bucket for the whole deployment. Trusting *more* hops than are
+  really in front of the service is the opposite failure: `X-Forwarded-For` becomes
+  spoofable and the limit stops applying at all. `main.ts` reads the value from the
+  environment because it is a deployment fact, not a preference.
+- **One options array holds every named bucket.** `ThrottlerModule` is `@Global()`, so two
+  `forRoot` calls with different arrays would race for one provider token; each controller
+  therefore skips the bucket that is not its own, or a share visitor would spend the
+  presign allowance. `throttler.config.test.ts` holds the experiment.
 
 ### Order of checks
 
@@ -444,13 +500,14 @@ apps/web/src/
     rooms.$roomId.tsx              browser shell: breadcrumbs, toolbar, upload zone
     rooms.$roomId.n.$nodeId.tsx    folder contents / file preview
     shared-with-me.tsx
-    s.$token.tsx                   public share surface (read-only)
+    s.$token.tsx                   public share surface (read-only), rooted at the share
+    s.$token.n.$nodeId.tsx         a node inside it — same NodeView, share source
   features/
     node-browser/   table, breadcrumbs, context menu, move dialog, delete warning
     upload/         dropzone, queue store, per-file progress
     share/          share dialog, link list, revoke
     viewer/         PDF preview
-  lib/              api-client, query-keys, formatters
+  lib/              api-client, query-keys, formatters, node-source (room vs share)
   components/ui/    shadcn
 ```
 

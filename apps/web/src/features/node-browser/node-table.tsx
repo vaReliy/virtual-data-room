@@ -20,6 +20,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatBytes, formatTimestamp, pluralize } from '@/lib/formatters';
+import { nodeLink, rootLink, type NodeSource } from '@/lib/node-source';
 import { NODE_DRAG_TYPE, carriesNode } from './node-drag';
 
 /**
@@ -46,7 +47,7 @@ function sizeOf(node: NodeSummary): string {
 }
 
 export function NodeTable({
-  roomId,
+  source,
   node,
   nodes,
   canWrite,
@@ -57,7 +58,7 @@ export function NodeTable({
   downloadingId,
   onDropMove,
 }: {
-  roomId: string;
+  source: NodeSource;
   /** The folder whose children are `nodes` — `null` at the caller's scope root. */
   node: NodeSummary | null;
   nodes: NodeSummary[];
@@ -128,7 +129,7 @@ export function NodeTable({
                 <div className="flex items-center gap-2">
                   <CornerLeftUp className="size-4 shrink-0 text-muted-foreground" />
                   <Link
-                    to={node.parentId ? `/rooms/${roomId}/n/${node.parentId}` : `/rooms/${roomId}`}
+                    to={node.parentId ? nodeLink(source, node.parentId) : rootLink(source)}
                     aria-label="Up one folder"
                     className="text-muted-foreground underline-offset-4 hover:underline"
                   >
@@ -199,7 +200,7 @@ export function NodeTable({
                       <File className="size-4 shrink-0 text-muted-foreground" />
                     )}
                     <Link
-                      to={`/rooms/${roomId}/n/${node.id}`}
+                      to={nodeLink(source, node.id)}
                       // The row already knows what it is, and the `410` body does not carry
                       // a type. Handing the type along in navigation state is what lets the
                       // preview show "this file was deleted" instead of the folder wording

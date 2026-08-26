@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError, NetworkError } from '@/lib/api-client';
+import type { NodeSource } from '@/lib/node-source';
 import { useBrowse } from './use-node-browser';
 
 /**
@@ -43,14 +44,14 @@ function describeFailure(error: Error): string {
  * waiting to happen.
  */
 export function MoveNodeDialog({
-  roomId,
+  source,
   node,
   rootLabel,
   open,
   onOpenChange,
   onMove,
 }: {
-  roomId: string;
+  source: NodeSource;
   node: NodeSummary | null;
   rootLabel: string;
   open: boolean;
@@ -66,7 +67,7 @@ export function MoveNodeDialog({
           // with it. Radix unmounts the closed dialog, which resets it on close too.
           <MoveNodeForm
             key={node.id}
-            roomId={roomId}
+            source={source}
             node={node}
             rootLabel={rootLabel}
             onMove={onMove}
@@ -84,14 +85,14 @@ export function MoveNodeDialog({
 }
 
 function MoveNodeForm({
-  roomId,
+  source,
   node,
   rootLabel,
   onMove,
   onCancel,
   onMoved,
 }: {
-  roomId: string;
+  source: NodeSource;
   node: NodeSummary;
   rootLabel: string;
   onMove: (destinationId: string | null) => Promise<void>;
@@ -103,7 +104,7 @@ function MoveNodeForm({
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<Error | null>(null);
 
-  const browse = useBrowse(roomId, destination);
+  const browse = useBrowse(source, destination);
   const page = browse.data?.pages[0];
   const here = page?.node ?? null;
   const folders = (browse.data?.pages ?? [])

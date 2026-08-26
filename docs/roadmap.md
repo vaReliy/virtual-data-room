@@ -476,8 +476,15 @@ carries no token and is never reached through `/s/:token` (decision #27).
       `dataRoomId`-bounded node lookup that takes **no** `AccessScope`. It belongs here,
       not in Phase 2 — owner resolution never reads a node, so before grants exist this
       method would have no caller
-- [ ] `PublicShareController` on `/s/:token`, read-only DTOs
-- [ ] Public surface: file → preview; folder or room → browser rooted there
+- [x] `PublicShareController` on `/s/:token`, read-only DTOs — `browseResponseSchema`
+      verbatim rather than a public twin, since it already describes a subtree-scoped
+      caller and a parallel schema is how the two drift. **With its rate limit**
+      (decision #30): keyed on the client IP, since there is no session to key on, and
+      therefore requiring Express `trust proxy` — set from `TRUST_PROXY_HOPS`, a
+      deployment fact that fails silently in both directions
+- [x] Public surface: file → preview; folder or room → browser rooted there. The same
+      `NodeView` given a share `source`, not a second browser: `role` arrives as `VIEWER`
+      and the existing gating hides every write affordance
 - [ ] "Shared with me" listing
 - [ ] Revoke. A revoked **`LINK`** gives `410 Gone` and its own client state; a revoked
       **`USER`** grant gives `404`, because the grantee must land back in "no grant"

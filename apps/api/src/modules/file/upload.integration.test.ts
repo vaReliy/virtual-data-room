@@ -8,7 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AccessControlService } from '../../access/access-control.service';
 import type { AccessScope } from '../../access/access-scope';
 import { SessionThrottlerGuard } from '../../common/session-throttler.guard';
-import { presignThrottlerConfig } from '../../common/throttler.config';
+import { PRESIGN_THROTTLER, throttlerConfig } from '../../common/throttler.config';
 import type { PrismaService } from '../../persistence/prisma.service';
 import { TransactionRunner } from '../../persistence/transaction.runner';
 import { createTestPrisma } from '../../test-support/database';
@@ -216,8 +216,11 @@ describe('upload protocol against Postgres', () => {
  * DI container would otherwise do it.
  */
 describe('presign rate limit', () => {
-  const [presign] = presignThrottlerConfig as Array<{ limit: number }>;
-  const limit = presign?.limit ?? 0;
+  // By name, not by position: the array carries every named bucket in the application now
+  // (`throttler.config.ts` says why it has to), and the presign one is not privileged by
+  // being written first.
+  const buckets = throttlerConfig as Array<{ name?: string; limit: number }>;
+  const limit = buckets.find((bucket) => bucket.name === PRESIGN_THROTTLER)?.limit ?? 0;
 
   function contextFor(userId: string): ExecutionContext {
     const request = { user: { userId, email: `${userId}@example.com`, issuedAt: null } };
@@ -231,7 +234,7 @@ describe('presign rate limit', () => {
 
   async function guardUnderTest(): Promise<SessionThrottlerGuard> {
     const guard = new SessionThrottlerGuard(
-      presignThrottlerConfig,
+      throttlerConfig,
       new ThrottlerStorageService(),
       new Reflector(),
     );

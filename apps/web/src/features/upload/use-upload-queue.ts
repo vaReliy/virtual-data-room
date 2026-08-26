@@ -11,6 +11,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 
 import { ApiError, NetworkError, apiSend } from '@/lib/api-client';
+import { uploadPath, type NodeSource } from '@/lib/node-source';
 import { queryKeys } from '@/lib/query-keys';
 import { TransferCancelled, TransferError, putObject } from './put-object';
 
@@ -33,14 +34,6 @@ export interface UploadItem {
   /** `0`–`1`, meaningful while `uploading`. */
   readonly progress: number;
   readonly error: string | null;
-}
-
-function presignPath(roomId: string): `/api/${string}` {
-  return `/api/rooms/${roomId}/uploads/presign`;
-}
-
-function completePath(roomId: string): `/api/${string}` {
-  return `/api/rooms/${roomId}/uploads/complete`;
 }
 
 /**
@@ -127,7 +120,7 @@ export interface UploadQueue {
  * is known and accepted — the sweeper is Phase 6 README prose — and it is why cancelling
  * before presign, which reserves nothing, is preferred wherever the queue can manage it.
  */
-export function useUploadQueue(roomId: string, parentId: string | null): UploadQueue {
+export function useUploadQueue(source: NodeSource, parentId: string | null): UploadQueue {
   const queryClient = useQueryClient();
   const [items, setItems] = useState<UploadItem[]>([]);
   // Not state: aborting is an imperative act on an in-flight request, and re-rendering
@@ -205,7 +198,7 @@ export function useUploadQueue(roomId: string, parentId: string | null): UploadQ
 
           let presigned;
           try {
-            presigned = await apiSend(presignPath(roomId), presignUploadResponseSchema, 'POST', {
+            presigned = await apiSend(uploadPath(source, 'presign'), presignUploadResponseSchema, 'POST', {
               parentId,
               files: live.map((item) => ({
                 name: item.name,
@@ -267,7 +260,7 @@ export function useUploadQueue(roomId: string, parentId: string | null): UploadQ
         // bytes are in storage, so a row claiming the upload was stopped would be a lie
         // one call away from a file existing anyway.
         try {
-          await apiSend(completePath(roomId), nodeSummarySchema, 'POST', {
+          await apiSend(uploadPath(source, 'complete'), nodeSummarySchema, 'POST', {
             blobId: target.blobId,
             parentId,
             name: item.name,
@@ -276,14 +269,14 @@ export function useUploadQueue(roomId: string, parentId: string | null): UploadQ
           // Per file, not per batch: each one lands at its own moment, and the row
           // appearing in the table as its progress bar finishes is the point.
           await queryClient.invalidateQueries({
-            queryKey: queryKeys.browse(roomId, parentId ?? undefined),
+            queryKey: queryKeys.browse(source, parentId ?? undefined),
           });
         } catch (error) {
           settle(item.id, { status: 'error', error: describeFailure(error) });
         }
       }
     },
-    [roomId, parentId, patch, settle, queryClient],
+    [source, parentId, patch, settle, queryClient],
   );
 
   const cancel = useCallback(

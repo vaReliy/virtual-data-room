@@ -1,18 +1,9 @@
+import { useMemo } from 'react';
 import { useLocation, useParams } from 'react-router';
-import type { NodeType } from '@dr/contracts';
 
 import { NodeNotFoundState } from '@/features/node-browser/browser-states';
-import { NodeView } from '@/features/node-browser/node-view';
-
-/**
- * What the row that was clicked believed this node to be. It rides on the history entry, so
- * it survives a reload of that entry; a link arriving from outside the app carries nothing.
- */
-function hintedType(state: unknown): NodeType | undefined {
-  if (typeof state !== 'object' || state === null || !('nodeType' in state)) return undefined;
-  const { nodeType } = state;
-  return nodeType === 'FILE' || nodeType === 'FOLDER' ? nodeType : undefined;
-}
+import { NodeView, hintedTypeOf } from '@/features/node-browser/node-view';
+import { roomSource } from '@/lib/node-source';
 
 /**
  * One node inside a Data Room — **a folder or a file, on the same route**. The browse
@@ -33,7 +24,9 @@ export function NodeRoute() {
   // Typed `unknown` on purpose: navigation state is whatever the previous screen put
   // there, including nothing at all on a pasted link, and React Router types it as `any`.
   const state: unknown = useLocation().state;
-  if (!roomId || !nodeId) return <NodeNotFoundState roomId={roomId ?? ''} />;
+  const source = useMemo(() => (roomId ? roomSource(roomId) : null), [roomId]);
 
-  return <NodeView roomId={roomId} nodeId={nodeId} hintedType={hintedType(state)} />;
+  if (!source || !nodeId) return <NodeNotFoundState source={source} />;
+
+  return <NodeView source={source} nodeId={nodeId} hintedType={hintedTypeOf(state)} />;
 }

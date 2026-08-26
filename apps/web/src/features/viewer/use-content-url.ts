@@ -2,11 +2,8 @@ import { contentUrlResponseSchema, type ContentUrlResponse } from '@dr/contracts
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
 import { apiFetch, isClientError } from '@/lib/api-client';
+import { contentPath, type NodeSource } from '@/lib/node-source';
 import { queryKeys } from '@/lib/query-keys';
-
-function contentPath(roomId: string, nodeId: string): `/api/${string}` {
-  return `/api/rooms/${roomId}/nodes/${nodeId}/content`;
-}
 
 /**
  * The presigned GET behind the preview — `{ url, expiresAt }` as JSON, not a redirect, so
@@ -29,12 +26,12 @@ function contentPath(roomId: string, nodeId: string): `/api/${string}` {
  * A 4xx is never retried: `404` and `410` are settled answers with screens of their own.
  */
 export function useContentUrl(
-  roomId: string,
+  source: NodeSource,
   nodeId: string,
 ): UseQueryResult<ContentUrlResponse, Error> {
   return useQuery({
-    queryKey: queryKeys.content(roomId, nodeId),
-    queryFn: () => apiFetch(contentPath(roomId, nodeId), contentUrlResponseSchema),
+    queryKey: queryKeys.content(source, nodeId),
+    queryFn: () => apiFetch(contentPath(source, nodeId), contentUrlResponseSchema),
     staleTime: 0,
     gcTime: 0,
     refetchOnWindowFocus: false,

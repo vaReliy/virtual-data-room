@@ -8,6 +8,7 @@ import { UploadQueuePanel } from '@/features/upload/upload-queue';
 import { useUploadQueue } from '@/features/upload/use-upload-queue';
 import { useDownload } from '@/features/viewer/use-download';
 import { formatBytes, pluralize } from '@/lib/formatters';
+import type { NodeSource } from '@/lib/node-source';
 import { EmptyFolderState } from './browser-states';
 import { DeleteNodeDialog } from './delete-node-dialog';
 import { InlineFailure } from './inline-failure';
@@ -47,24 +48,24 @@ function summarize(totals: { folderCount: number; fileCount: number; totalSize: 
  * screens, and dispatches on `node.type`: a file id lands on the preview, a folder id here.
  */
 export function NodeBrowser({
-  roomId,
+  source,
   nodeId,
   browse,
   rootLabel,
 }: {
-  roomId: string;
+  source: NodeSource;
   nodeId?: string;
   browse: BrowseQuery;
   rootLabel: string;
 }) {
-  const createFolder = useCreateFolder(roomId, nodeId);
-  const renameNode = useRenameNode(roomId, nodeId);
-  const deleteNode = useDeleteNode(roomId, nodeId);
-  const moveNode = useMoveNode(roomId, nodeId);
-  const uploads = useUploadQueue(roomId, nodeId ?? null);
+  const createFolder = useCreateFolder(source, nodeId);
+  const renameNode = useRenameNode(source, nodeId);
+  const deleteNode = useDeleteNode(source, nodeId);
+  const moveNode = useMoveNode(source, nodeId);
+  const uploads = useUploadQueue(source, nodeId ?? null);
   // Not behind `canWrite`: downloading is a read, and a `VIEWER` sharing this screen in
   // Phase 4 may save what they can already open.
-  const downloads = useDownload(roomId);
+  const downloads = useDownload(source);
 
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState<NodeSummary | null>(null);
@@ -95,7 +96,7 @@ export function NodeBrowser({
     <div className="mx-auto w-full max-w-4xl space-y-6">
       <div className="space-y-2">
         <NodeBreadcrumbs
-          roomId={roomId}
+          source={source}
           rootLabel={rootLabel}
           trail={breadcrumbs}
           current={node?.name ?? null}
@@ -148,7 +149,7 @@ export function NodeBrowser({
           <EmptyFolderState />
         ) : (
           <NodeTable
-            roomId={roomId}
+            source={source}
             node={node}
             nodes={children}
             canWrite={canWrite}
@@ -224,7 +225,7 @@ export function NodeBrowser({
       />
 
       <MoveNodeDialog
-        roomId={roomId}
+        source={source}
         node={moving}
         rootLabel={rootLabel}
         open={moving !== null}

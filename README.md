@@ -178,6 +178,18 @@ Not secrets: identifiers and public origins. Set them with
 | `APP_URL`                                              | Public SPA origin, e.g. `https://<app>.vercel.app`   |
 | `GOOGLE_CLIENT_ID`                                     | Google OAuth client id                               |
 | `STORAGE_ENDPOINT`, `STORAGE_REGION`, `STORAGE_BUCKET` | GCS S3-compatible endpoint and bucket                |
+| `TRUST_PROXY_HOPS` *(optional)*                        | Proxies in front of Cloud Run; defaults to `0`       |
+
+`TRUST_PROXY_HOPS` is the one optional entry, and `deploy.yml` deliberately does **not**
+fail when it is missing: its default is the safe direction. It feeds Express `trust proxy`,
+which exactly one thing reads — the per-IP rate limit on the anonymous share surface. Too
+low and every caller shares one bucket; too high and `X-Forwarded-For` becomes spoofable
+and the limit does nothing. It is a property of the deployed request chain, so **observe
+it** from the service's own log rather than guessing: the API logs the first anonymous
+share request's `req.ip` and raw header once per process for that purpose.
+
+Setting it in the Cloud Run console instead would not survive: `deploy.yml` uses
+`--set-env-vars`, which replaces the service's whole environment on every deploy.
 
 `GOOGLE_CALLBACK_URL` is deliberately **not** configurable: `deploy.yml` derives it as
 `${APP_URL}/api/auth/google/callback`. It has to match the redirect URI registered on the

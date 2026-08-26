@@ -10,6 +10,10 @@ import { ShareService } from './share.service';
 /**
  * Creating, listing and revoking shares.
  *
+ * **Opening one is not here.** The anonymous `/s/:token` surface lives in `modules/public/`
+ * (`architecture.md` § Folder layout), so that everything reachable without a session sits
+ * in one directory rather than beside the owner endpoints it must not be confused with.
+ *
  * `ShareRepository` is registered in `PersistenceModule` with the other repositories, not
  * here: that module is the only place `PrismaService` is injectable, and keeping the list
  * of things that may touch the database in one file is what makes the boundary reviewable.
