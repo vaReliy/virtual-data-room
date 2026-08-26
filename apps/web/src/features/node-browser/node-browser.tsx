@@ -1,14 +1,16 @@
 import { useState } from 'react';
-import { AlertTriangle, FolderPlus } from 'lucide-react';
+import { FolderPlus } from 'lucide-react';
 import type { NodeSummary } from '@dr/contracts';
 
 import { Button } from '@/components/ui/button';
 import { UploadButton, UploadDropzone, uploadLimitsHint } from '@/features/upload/upload-dropzone';
 import { UploadQueuePanel } from '@/features/upload/upload-queue';
 import { useUploadQueue } from '@/features/upload/use-upload-queue';
+import { useDownload } from '@/features/viewer/use-download';
 import { formatBytes, pluralize } from '@/lib/formatters';
 import { EmptyFolderState } from './browser-states';
 import { DeleteNodeDialog } from './delete-node-dialog';
+import { InlineFailure } from './inline-failure';
 import { MoveNodeDialog } from './move-node-dialog';
 import { NodeBreadcrumbs } from './node-breadcrumbs';
 import { NodeNameDialog } from './node-name-dialog';
@@ -60,6 +62,9 @@ export function NodeBrowser({
   const deleteNode = useDeleteNode(roomId, nodeId);
   const moveNode = useMoveNode(roomId, nodeId);
   const uploads = useUploadQueue(roomId, nodeId ?? null);
+  // Not behind `canWrite`: downloading is a read, and a `VIEWER` sharing this screen in
+  // Phase 4 may save what they can already open.
+  const downloads = useDownload(roomId);
 
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState<NodeSummary | null>(null);
@@ -69,6 +74,10 @@ export function NodeBrowser({
   // the listing, and there is no dialog open to hold the message. So a failed drop reports
   // here, once, dismissibly. The dialog keeps its own failure inline.
   const [dragFailure, setDragFailure] = useState<string | null>(null);
+  // A download reports through the same banner, for the same reason and by design: Activity
+  // deletes this surface and takes both cases with it. Whichever failed last is the one on
+  // screen — two stacked banners for two unrelated mishaps is noise, not information.
+  const failure = dragFailure ?? downloads.failure;
 
   const [first] = browse.data?.pages ?? [];
   if (!first) return null;
@@ -115,20 +124,14 @@ export function NodeBrowser({
 
       {canWrite ? <UploadQueuePanel queue={uploads} /> : null}
 
-      {dragFailure ? (
-        <div className="flex items-start gap-2 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <p className="flex-1">{dragFailure}</p>
-          <button
-            type="button"
-            className="underline underline-offset-4"
-            onClick={() => {
-              setDragFailure(null);
-            }}
-          >
-            Dismiss
-          </button>
-        </div>
+      {failure ? (
+        <InlineFailure
+          message={failure}
+          onDismiss={() => {
+            setDragFailure(null);
+            downloads.dismissFailure();
+          }}
+        />
       ) : null}
 
       {/*
@@ -149,8 +152,16 @@ export function NodeBrowser({
             onRename={setRenaming}
             onDelete={setDeleting}
             onMove={setMoving}
+            downloadingId={downloads.pendingId}
+            onDownload={(node) => {
+              // The banner holds one message. Clearing the other case here is what keeps
+              // "whichever failed last" true rather than "whichever failed first".
+              setDragFailure(null);
+              downloads.download(node);
+            }}
             onDropMove={(source, destination) => {
               setDragFailure(null);
+              downloads.dismissFailure();
               moveTo(source, destination.id).catch((error: unknown) => {
                 const message = error instanceof Error ? error.message : String(error);
                 setDragFailure(

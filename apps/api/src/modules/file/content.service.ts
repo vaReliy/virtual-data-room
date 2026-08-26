@@ -1,5 +1,9 @@
 import { Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { CONTENT_URL_TTL_SECONDS, type ContentUrlResponse } from '@dr/contracts';
+import {
+  CONTENT_URL_TTL_SECONDS,
+  type ContentDisposition,
+  type ContentUrlResponse,
+} from '@dr/contracts';
 
 import type { AccessScope } from '../../access/access-scope';
 import { StorageService } from '../../storage/storage.service';
@@ -37,8 +41,19 @@ export class ContentService {
    * preview refetches on. Five minutes, so a leaked URL dies quickly — the number is
    * load-bearing, which is why `CONTENT_URL_TTL_SECONDS` is shared with the client instead
    * of written twice.
+   *
+   * `disposition` selects preview or download. It is a parameter of the *signature*, not of
+   * the client's handling of the response — a cross-origin `<a download>` does nothing —
+   * so a preview URL cannot be reused for a save and vice versa. Downloading is a **read**,
+   * and this endpoint is deliberately unguarded by role for the same reason previewing is:
+   * a `VIEWER` must be able to keep a copy of a file shared with them, and refusing here
+   * would be theatre while the same bytes render in the frame beside the button.
    */
-  async urlFor(scope: AccessScope, nodeId: string): Promise<ContentUrlResponse> {
+  async urlFor(
+    scope: AccessScope,
+    nodeId: string,
+    disposition: ContentDisposition,
+  ): Promise<ContentUrlResponse> {
     const node = await this.nodeService.resolveLiveNode(scope, nodeId);
 
     if (node.type !== 'FOLDER' && node.blobId !== null) {
@@ -51,6 +66,7 @@ export class ContentService {
         contentType: blob.mimeType,
         fileName: node.name,
         expiresIn: CONTENT_URL_TTL_SECONDS,
+        disposition,
       });
 
       return {

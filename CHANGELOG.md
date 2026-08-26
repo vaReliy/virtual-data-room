@@ -9,6 +9,44 @@ otherwise see.
 
 ## [Unreleased]
 
+### Added — Download a file (Phase 4, issue 05)
+
+- **`GET /api/rooms/:roomId/nodes/:nodeId/content?disposition=inline|attachment`.** The
+  parameter selects the `Content-Disposition` **type** written into the presigned GET;
+  `filename*=` (RFC 5987) is unconditional, and is what makes a saved file arrive named
+  after the node rather than after its UUID storage key. Absent means `inline`, so every
+  caller written before this is unaffected.
+- **This cannot be done on the client, and a future refactor must not try.** `<a download>`
+  is ignored for a **cross-origin** URL. The bytes are served by storage, not by this
+  origin, so the disposition has to be inside the signature — which means it is chosen at
+  signing time, on the server. The preview's URL is signed `inline` and is therefore
+  unusable for a save: `useDownload` fetches its own URL at click time and does not go
+  through TanStack Query at all, so there is no cached entry to reuse and none to go stale
+  (the same hazard decision #15 addresses for the preview).
+- **An unknown `disposition` is `400`, not a fallback to `inline`.** New `ZodQueryPipe`
+  (`common/zod-query.pipe.ts`) exists for that status: `ZodValidationPipe` answers `422`,
+  which is right for a body a person typed and wrong for a query parameter our own client
+  assembles — there, a bad value is a malformed request, and a silent default would hide the
+  typo while the feature half-worked.
+- **Download is available to a `VIEWER`, deliberately.** The content endpoint is not guarded
+  by role — the `AccessScope` boundary already answers who may read — and a reader who can
+  open the document in the preview can already keep the bytes. The row-actions menu is
+  therefore **no longer hidden behind `canWrite`**: it renders whenever it would hold at
+  least one item, with each mutation item individually behind the role. Re-gating the whole
+  menu would leave a reader with a permitted download and no way to ask for it.
+- **`InlineFailure`** (`features/node-browser/inline-failure.tsx`) is the extracted banner
+  that already reported failed drag-moves, now shared with download — the two operations
+  that finish with no dialog open to report into. It is one component on purpose: Activity
+  (`phase-4.1`, issue 06) deletes this surface and takes both cases with it, and a second
+  hand-rolled banner would survive that deletion unnoticed.
+- Verified against the local MinIO bucket that both dispositions come back on the response
+  and that a Cyrillic file name survives the header intact. **GCS is not covered by that** —
+  the `response-*` overrides are exactly where the two can differ, so it stays a manual gate
+  item against a real bucket.
+- Note for anyone editing `packages/contracts`: `apps/api` still type-checks against the
+  package's `dist`, so a new export needs `pnpm --filter @dr/contracts build` before
+  `pnpm typecheck` will see it. `apps/web` resolves the source directly.
+
 ### Added — Phase 3 (S2), upload queue, PDF preview, file states, move UI
 
 - **Upload queue** (`features/upload/`). The three-step protocol, driven from the browser:

@@ -135,6 +135,11 @@
    *
    * `:disabled` is excluded: a disabled control genuinely is not clickable, and a pointer
    * over one promises something that will not happen.
+   *
+   * **This cannot fix a component that names a cursor utility of its own.** Menu items do
+   * (`dropdown-menu.tsx`), and `cursor-default` is in Tailwind's `utilities` layer while
+   * this rule is in `base` — later layers win outright, so no selector written here would
+   * ever apply. That one is fixed in the component's own class, not here.
    */
   button:not(:disabled),
   [role='button']:not([aria-disabled='true']) {

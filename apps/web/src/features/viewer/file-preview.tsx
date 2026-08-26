@@ -1,12 +1,14 @@
-import { ExternalLink } from 'lucide-react';
+import { Download, ExternalLink } from 'lucide-react';
 import type { Breadcrumb, NodeSummary } from '@dr/contracts';
 
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { InlineFailure } from '@/features/node-browser/inline-failure';
 import { NodeBreadcrumbs } from '@/features/node-browser/node-breadcrumbs';
 import { ErrorState } from '@/features/session/error-state';
 import { formatBytes, formatTimestamp } from '@/lib/formatters';
 import { useContentUrl } from './use-content-url';
+import { useDownload } from './use-download';
 
 /**
  * The file preview: an `<iframe>` pointed at a short-lived presigned GET (decision #15).
@@ -37,6 +39,7 @@ export function FilePreview({
   rootLabel: string;
 }) {
   const content = useContentUrl(roomId, node.id);
+  const downloads = useDownload(roomId);
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6">
@@ -54,20 +57,43 @@ export function FilePreview({
               {formatBytes(node.size)} · updated {formatTimestamp(node.updatedAt)}
             </p>
           </div>
-          {content.data ? (
-            <Button asChild size="sm" variant="outline">
-              {/*
-                `noreferrer` matters more than usual: the URL *is* the capability for the
-                next 300 seconds, and it must not travel to another site in a `Referer`.
-              */}
-              <a href={content.data.url} target="_blank" rel="noreferrer">
-                <ExternalLink />
-                Open in a new tab
-              </a>
+          <div className="flex items-center gap-2">
+            {/*
+              Always offered, even while the preview is still loading or has failed: the
+              download does not reuse the preview's URL and does not depend on it. That URL
+              was signed `inline`, and disposition is chosen at signing time — so this
+              button fetches its own, signed `attachment`.
+            */}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={downloads.pendingId === node.id}
+              onClick={() => {
+                downloads.download(node);
+              }}
+            >
+              <Download />
+              {downloads.pendingId === node.id ? 'Preparing…' : 'Download'}
             </Button>
-          ) : null}
+            {content.data ? (
+              <Button asChild size="sm" variant="outline">
+                {/*
+                  `noreferrer` matters more than usual: the URL *is* the capability for the
+                  next 300 seconds, and it must not travel to another site in a `Referer`.
+                */}
+                <a href={content.data.url} target="_blank" rel="noreferrer">
+                  <ExternalLink />
+                  Open in a new tab
+                </a>
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
+
+      {downloads.failure ? (
+        <InlineFailure message={downloads.failure} onDismiss={downloads.dismissFailure} />
+      ) : null}
 
       {content.isPending ? (
         <Skeleton className="h-[70vh] w-full rounded-lg" />

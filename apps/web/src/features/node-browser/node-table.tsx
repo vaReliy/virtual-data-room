@@ -1,6 +1,6 @@
 import { useState, type DragEvent } from 'react';
 import { Link } from 'react-router';
-import { File, Folder, MoreHorizontal } from 'lucide-react';
+import { Download, File, Folder, MoreHorizontal } from 'lucide-react';
 import type { NodeSummary } from '@dr/contracts';
 
 import { Button } from '@/components/ui/button';
@@ -52,6 +52,8 @@ export function NodeTable({
   onRename,
   onDelete,
   onMove,
+  onDownload,
+  downloadingId,
   onDropMove,
 }: {
   roomId: string;
@@ -60,6 +62,9 @@ export function NodeTable({
   onRename: (node: NodeSummary) => void;
   onDelete: (node: NodeSummary) => void;
   onMove: (node: NodeSummary) => void;
+  onDownload: (node: NodeSummary) => void;
+  /** The row whose presigned URL is being fetched, if any. */
+  downloadingId: string | null;
   onDropMove: (source: NodeSummary, destination: NodeSummary) => void;
 }) {
   /**
@@ -193,11 +198,17 @@ export function NodeTable({
                 </TableCell>
                 <TableCell>
                   {/*
-                    Hidden behind `role`, and that is presentation only: the service asserts
-                    `scope.role === 'OWNER'` as the first line of every mutation and refuses
-                    with `404` (decision #25). `curl` does not read the UI.
+                    The mutations are hidden behind `role`, and that is presentation only:
+                    the service asserts `scope.role === 'OWNER'` as the first line of every
+                    mutation and refuses with `404` (decision #25). `curl` does not read the
+                    UI.
+
+                    The menu itself is not behind `role`, because Download is not a
+                    mutation. A `VIEWER` gets a menu holding that one item — hiding it would
+                    be the only thing standing between them and bytes the preview already
+                    serves them.
                   */}
-                  {canWrite ? (
+                  {canWrite || node.type === 'FILE' ? (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" aria-label={`Actions for ${node.name}`}>
@@ -205,19 +216,36 @@ export function NodeTable({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onSelect={() => {
-                            onRename(node);
-                          }}
-                        >
-                          Rename
-                        </DropdownMenuItem>
+                        {/*
+                          Files only: a folder has no blob and the endpoint answers `422`
+                          for one. There is no zip-a-folder feature to offer here.
+                        */}
+                        {node.type === 'FILE' ? (
+                          <DropdownMenuItem
+                            disabled={downloadingId === node.id}
+                            onSelect={() => {
+                              onDownload(node);
+                            }}
+                          >
+                            <Download />
+                            {downloadingId === node.id ? 'Preparing…' : 'Download'}
+                          </DropdownMenuItem>
+                        ) : null}
+                        {canWrite ? (
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              onRename(node);
+                            }}
+                          >
+                            Rename
+                          </DropdownMenuItem>
+                        ) : null}
                         {/*
                           The primary move affordance (decision #19): reachable by keyboard,
                           announced by a screen reader, and the one that satisfies the brief
                           on its own. Dragging the row is the convenience on top of it.
                         */}
-                        {node.type === 'FILE' ? (
+                        {canWrite && node.type === 'FILE' ? (
                           <DropdownMenuItem
                             onSelect={() => {
                               onMove(node);
@@ -226,14 +254,16 @@ export function NodeTable({
                             Move to…
                           </DropdownMenuItem>
                         ) : null}
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onSelect={() => {
-                            onDelete(node);
-                          }}
-                        >
-                          Delete
-                        </DropdownMenuItem>
+                        {canWrite ? (
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => {
+                              onDelete(node);
+                            }}
+                          >
+                            Delete
+                          </DropdownMenuItem>
+                        ) : null}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   ) : null}

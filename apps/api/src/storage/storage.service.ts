@@ -8,6 +8,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import type { ContentDisposition } from '@dr/contracts';
 
 import type { Env } from '../config/env';
 
@@ -95,10 +96,21 @@ export class StorageService {
    * — recorded at PUT — and `fileName` from the node, so `contract.pdf` renamed to
    * `contract.txt` still renders as a PDF. That is intended: rename does not police
    * extensions (decision #28).
+   *
+   * `disposition` is the difference between a preview and a download, and it is a parameter
+   * *here* — not on the client — because it is signed. `<a download>` is ignored for a
+   * cross-origin URL, so `attachment` inside this header is the only thing that saves a
+   * file to disk. The `filename*=` half is unconditional either way: it is what makes a
+   * saved file arrive named after the node instead of after its UUID storage key.
    */
   async presignGet(
     key: string,
-    options: { contentType: string; fileName: string; expiresIn: number },
+    options: {
+      contentType: string;
+      fileName: string;
+      expiresIn: number;
+      disposition: ContentDisposition;
+    },
   ): Promise<string> {
     return getSignedUrl(
       this.client,
@@ -106,7 +118,7 @@ export class StorageService {
         Bucket: this.bucket,
         Key: key,
         ResponseContentType: options.contentType,
-        ResponseContentDisposition: `inline; filename*=${encodeRfc5987(options.fileName)}`,
+        ResponseContentDisposition: `${options.disposition}; filename*=${encodeRfc5987(options.fileName)}`,
       }),
       { expiresIn: options.expiresIn },
     );

@@ -114,3 +114,24 @@ export const contentUrlResponseSchema = z.object({
   expiresAt: z.iso.datetime(),
 });
 export type ContentUrlResponse = z.infer<typeof contentUrlResponseSchema>;
+
+/**
+ * What the browser is asked to do with the bytes — the `Content-Disposition` *type* signed
+ * into the presigned GET.
+ *
+ * It has to be decided by the server because it is decided at signing time. `<a download>`
+ * is ignored for a cross-origin URL, and the bytes are served by storage rather than by
+ * this origin, so no client-side attribute can turn a preview into a save. This parameter
+ * is the whole of the download feature.
+ */
+export const contentDispositionSchema = z.enum(['inline', 'attachment']);
+export type ContentDisposition = z.infer<typeof contentDispositionSchema>;
+
+/**
+ * `?disposition=` on the content endpoint, defaulting to `inline` so every caller written
+ * before download existed keeps the behaviour it was written against.
+ *
+ * The default lives in the schema rather than in the controller signature: parsing is the
+ * one place that knows both that the parameter was absent and what absent means.
+ */
+export const contentDispositionQuerySchema = contentDispositionSchema.default('inline');

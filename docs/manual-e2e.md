@@ -291,7 +291,10 @@ the session cookie by hand to simulate the end state.
 **Preconditions:** signed in as someone with read-only access to a shared folder.
 
 1. Open it.
-   - Expected: no upload control, no create-folder control, no per-row actions.
+   - Expected: no upload control, no create-folder control, and no rename, move or delete on
+     any row.
+   - Expected: a file row still offers **Download**, and nothing else. Downloading is a read,
+     and a reader may keep a copy of what they can already open — see DL-04.
    - Expected: dragging files over the list offers no drop indication.
    - Rule: hiding controls is presentation only — the server refuses the write regardless.
 
@@ -359,6 +362,56 @@ the session cookie by hand to simulate the end state.
    - Expected: a "not found" screen, distinct in wording from the deleted screens.
    - Rule: something outside the caller's access must be indistinguishable from something
      that never existed. A signed-in user must never be able to tell them apart.
+
+---
+
+## Download
+
+### DL-01 — Download a file from its row
+
+**Preconditions:** a folder holding an uploaded PDF.
+
+1. Open the row's actions and choose **Download**.
+   - Expected: the browser saves a file **named after the node**, ending in `.pdf` — not a
+     bare identifier and not a name the browser invented.
+   - Expected: the page does not navigate anywhere. The listing stays exactly as it was.
+   - Expected: a non-ASCII name (Cyrillic, an accent, a space) survives intact.
+
+### DL-02 — Download from the preview, and the preview stays a preview
+
+1. Open a file, then use **Download** on its screen.
+   - Expected: the file is saved, and the document on screen is untouched — same page, same
+     scroll position.
+2. Reload and open the document without downloading.
+   - Expected: it still renders inline (PRV-01 unchanged).
+   - Rule: preview and download are two differently signed addresses for the same bytes. One
+     is decided by the server at the moment it is asked for, not by the link the page is
+     already holding.
+
+### DL-03 — A folder cannot be downloaded
+
+1. Open a folder row's actions.
+   - Expected: no Download item. A folder has no content of its own to save, and there is no
+     zip-a-folder feature.
+
+### DL-04 — A reader can download **[phase 4+]**
+
+**Preconditions:** signed in as someone with read-only access to a shared folder.
+
+1. Download a file from its row, and again from its preview screen.
+   - Expected: both succeed.
+   - Rule: this is deliberate. The reader can already open the document; refusing to let them
+     save it would block nothing and hide a control that works.
+
+### DL-05 — A file deleted between the listing and the click **[state]**
+
+**Preconditions:** a folder listing open in tab A; the file deleted in tab B.
+
+1. In tab A, without refreshing, choose **Download** on that row.
+   - Expected: an inline message naming the file and saying it was **deleted** — distinct
+     from the wording used for a file that is merely no longer available here, and
+     dismissible.
+   - Expected: no file is saved, no dialog opens, and nothing else on the screen changes.
 
 ---
 

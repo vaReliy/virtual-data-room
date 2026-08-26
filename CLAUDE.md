@@ -146,14 +146,37 @@ plausible-looking local fix silently breaks a property the design depends on.
 
 ## Agent skills
 
+These three sections are the whole convention. There is no `docs/agents/` directory —
+earlier drafts pointed at one, and nothing was ever written there.
+
 ### Issue tracker
 
-Local markdown under gitignored `notes/issues/<feature-slug>/`, not GitHub/GitLab (no remote configured). See `docs/agents/issue-tracker.md`.
+Tasks are local markdown under gitignored `notes/issues/`, never GitHub or GitLab: this
+repository has no remote configured, so an agent must not reach for `gh` or open a PR.
+
+- One phase or feature per directory: `notes/issues/<slug>/`, e.g. `phase-3/`, `phase-4.1/`.
+- The brief for the whole set is `notes/issues/<slug>/PRD.md`.
+- Individual issues are `notes/issues/<slug>/issues/<NN>-<slug>.md`, numbered from `01`.
+- `notes/issues/<slug>/deviations.md` carries what a session learned that the next one
+  cannot re-derive — a real bucket's behaviour, a library that did not do what its docs
+  said. `notes/` is gitignored, so anything that must outlive the work belongs in
+  `CHANGELOG.md` instead.
+- **An issue brief must be self-contained.** Inline the invariant it depends on; do not
+  cite the document that states it. A brief that says "see `data-model.md`" is a brief
+  that gets implemented without the constraint, and the failure is silent.
 
 ### Triage labels
 
-Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), recorded as a `Status:` line per issue. See `docs/agents/triage-labels.md`.
+A `Status:` line directly under each issue's title, from this vocabulary:
+
+`needs-triage` · `needs-info` · `ready-for-agent` · `ready-for-human` · `wontfix`
+
+`ready-for-agent` means an agent may pick it up unattended. Deliberately deferred work is
+`ready-for-human` — not `wontfix`, which means never, and not `ready-for-agent`, which
+would let a sweep grab something that was parked on purpose.
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` at root + `docs/decisions.md` as a running decision log (not per-file ADRs). See `docs/agents/domain.md`.
+Single context, no per-file ADRs: `CONTEXT.md` at the root is the glossary, and
+`docs/decisions.md` is the running decision log. A term goes into `CONTEXT.md` the moment
+it is settled — before three files invent three names for the same thing.
