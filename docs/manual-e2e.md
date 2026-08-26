@@ -592,6 +592,95 @@ current scope — the rule is enforced by the server and covered by an automated
 
 ---
 
+## Sharing
+
+### SHR-01 — Create a link share on a folder, a file, and the whole Data Room
+
+**Preconditions:** an owner in a room holding at least one folder and one uploaded file.
+
+1. From a folder row's actions, choose **Share**, leave the mode on **Anyone with the
+   link**, and create it.
+   - Expected: the dialog switches to a result view showing the link in a selectable field
+     with a copy button, and a sentence saying it cannot be shown again.
+   - Expected: the dialog does **not** close on its own.
+2. Copy the link, dismiss the dialog, and repeat from a file's row and from its preview
+   screen.
+   - Expected: same result view both times.
+3. From the room's own toolbar (not a row — there is no row for the room itself), share the
+   whole Data Room.
+   - Expected: same result view.
+4. Paste each copied link into a private window.
+   - Expected: each opens the node it was created on, rooted there — the folder's contents,
+     the file's preview, or the room itself.
+
+### SHR-02 — Create a share with a specific person, and the address is normalized
+
+**Preconditions:** an owner in a room; a second Google account's email address.
+
+1. Open **Share** on any node, switch to **A specific person**, and type the address with
+   mixed case and leading/trailing spaces — e.g. `  Anna@Example.COM  `.
+2. Create the share.
+   - Expected: a plain confirmation naming the address, with no link and no copy button —
+     a person share has nothing to copy.
+   - Expected: the dialog does not close on its own.
+   - Rule: the address is stored lower-case and trimmed, so signing in with any casing of
+     the same address resolves this grant. Typing an invalid address is refused on the field
+     before the request is sent.
+
+### SHR-03 — An expiry of today still creates a live share
+
+1. Open **Share**, pick today's date as the expiry, and create either mode of share.
+   - Expected: the share is created, and immediately opening it (the copied link, or the
+     grantee signing in) still works — the expiry is end-of-day, not midnight.
+
+### SHR-04 — Listing the live shares on a node, and revoking
+
+**Preconditions:** an owner in a room; at least one node (or the room itself) with no
+shares, and one with a live share of each mode.
+
+1. Open **Share** on the node with no shares.
+   - Expected: "Who has access" reads one calm sentence — no one has access yet — not an
+     error state.
+2. Open **Share** on the node holding both a link share and a person share.
+   - Expected: both rows list. The link row says a link exists, when it was created and its
+     expiry, and nothing else — no masked value, no "Copy" or "Reveal" affordance, nothing
+     that looks like it could show the URL. The person row shows the grantee's email.
+3. Revoke the link share, then the person share, one at a time.
+   - Expected: each disappears from the list immediately, no manual refresh, and the dialog
+     stays open.
+4. Open the same **Share** dialog again (room toolbar for the whole room, a row's actions
+   dropdown for a folder or file, and a file's preview screen).
+   - Expected: the whole-room share, list on a folder and list on a file all work the same
+     way, and a share just created elsewhere in the dialog appears in the list without
+     reopening the dialog a second time.
+5. Create a share, then revoke it twice in a row (a second click, or the same action from
+   another tab).
+   - Expected: the second revoke is not reported as an error — the outcome the user wanted
+     already holds.
+
+### SHR-05 — "Shared with me"
+
+**Preconditions:** two Google accounts, A (owner) and B (grantee). A has shared one folder
+with B by email, using **A specific person**, and B holds no other grants.
+
+1. Sign in as B, with no shares yet.
+   - Expected: `/` lands directly in B's own Data Room, exactly as before this feature — no
+     new section, no flash of one.
+2. As A, share a folder with B's address, then sign in as B again (or reload `/` in an
+   already-signed-in tab).
+   - Expected: `/` now renders a "Shared with me" section instead of redirecting, with one
+     row naming **the folder**, not the room, and "Shared by" naming A.
+3. Follow the row.
+   - Expected: it opens the folder with breadcrumbs starting **there** — no room name in the
+     header, nothing above the grant.
+4. As A, share the whole Data Room with B (a second grant, `nodeId: null`).
+   - Expected: a second row appears naming **the room**, and following it opens the room
+     itself.
+5. As A, revoke both grants.
+   - Expected: B's next visit to `/` redirects straight to B's own room again.
+
+---
+
 ## Cross-cutting
 
 ### X-01 — Two tabs stay honest about each other
@@ -617,10 +706,11 @@ current scope — the rule is enforced by the server and covered by an automated
 
 ### X-04 — Sharing surfaces **[phase 4+]**
 
-The share dialog, "Shared with me" and revocation from the owner's side are not built; no
-cases written. The public read-only surface is, and its cases are under **Share links**
-below. When the owner-side cases arrive, a revoked link and a revoked user grant must give
-**different** answers, and the reasoning belongs with those cases.
+Creating, listing, revoking and "shared with me" are all covered above, under **Sharing**.
+The public read-only surface is separate, and its cases are under **Share links** below.
+What a revoked link or a revoked user grant looks like from the *grantee's* side (a `410` on
+the public surface, a `404` on sign-in) belongs with those cases, not with the owner-side
+revoke control tested here.
 
 ---
 

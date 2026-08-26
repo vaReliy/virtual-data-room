@@ -1,0 +1,67 @@
+import { Link } from 'react-router';
+import { Building2, File, Folder } from 'lucide-react';
+import type { SharedWithMeEntry } from '@dr/contracts';
+
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { formatTimestamp } from '@/lib/formatters';
+
+function entryHref(entry: SharedWithMeEntry): string {
+  return entry.nodeId === null
+    ? `/rooms/${entry.dataRoomId}`
+    : `/rooms/${entry.dataRoomId}/n/${entry.nodeId}`;
+}
+
+function EntryIcon({ type }: { type: SharedWithMeEntry['type'] }) {
+  if (type === 'ROOM') return <Building2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" />;
+  if (type === 'FOLDER') return <Folder className="mt-0.5 size-4 shrink-0 text-muted-foreground" />;
+  return <File className="mt-0.5 size-4 shrink-0 text-muted-foreground" />;
+}
+
+/**
+ * One row per live grant. `entry.name` is the granted node's name, never the room's —
+ * except for a `'ROOM'` entry, where the room *is* the grantee's scope. Do not fetch or
+ * display anything beyond what the row already carries: a subtree grantee must never learn
+ * the name of anything above their grant, and the API already withholds it.
+ */
+function SharedWithMeRow({ entry }: { entry: SharedWithMeEntry }) {
+  return (
+    <li>
+      <Link
+        to={entryHref(entry)}
+        className="flex items-start gap-2 rounded-md px-2 py-2 -mx-2 hover:bg-muted"
+      >
+        <EntryIcon type={entry.type} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{entry.name}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            Shared by {entry.sharedBy.name ?? entry.sharedBy.email} · {formatTimestamp(entry.createdAt)}
+          </p>
+        </div>
+      </Link>
+    </li>
+  );
+}
+
+/**
+ * The home screen's "Shared with me" list. `home.tsx` renders this only once its query has
+ * resolved with at least one row — an empty result redirects instead, so there is no empty
+ * state here to build.
+ */
+export function SharedWithMeSection({ entries }: { entries: SharedWithMeEntry[] }) {
+  return (
+    <div className="mx-auto w-full max-w-2xl">
+      <Card>
+        <CardHeader>
+          <CardTitle>Shared with me</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ul className="divide-y">
+            {entries.map((entry) => (
+              <SharedWithMeRow key={`${entry.dataRoomId}:${entry.nodeId ?? 'room'}`} entry={entry} />
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

@@ -38,4 +38,20 @@ export const queryKeys = {
    */
   content: (source: NodeSource, nodeId: string) =>
     [...sourceKey(source), 'content', nodeId] as const,
+
+  /**
+   * `GET /api/rooms/:roomId/shares` — the live shares on one node, or, with `nodeId: null`,
+   * on the whole Data Room. Owner-only and room-scoped: unlike `browse`, there is no second
+   * way to reach the same list (a `/s/:token` visitor can never call this endpoint), so the
+   * key carries no `NodeSource`.
+   */
+  shares: (roomId: string, nodeId: string | null) =>
+    ['room', roomId, 'shares', nodeId ?? 'room'] as const,
+
+  /**
+   * `GET /api/shares/shared-with-me` — one row per live grant the caller holds, across
+   * rooms. Neither a room id nor a `NodeSource` applies: the endpoint takes neither, and
+   * nothing in the app invalidates this key — grants are created by other people.
+   */
+  sharedWithMe: ['shared-with-me'] as const,
 } as const;

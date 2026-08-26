@@ -1,4 +1,5 @@
-import { Download, ExternalLink } from 'lucide-react';
+import { useState } from 'react';
+import { Download, ExternalLink, Share2 } from 'lucide-react';
 import type { Breadcrumb, NodeSummary } from '@dr/contracts';
 
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { InlineFailure } from '@/features/node-browser/inline-failure';
 import { NodeBreadcrumbs } from '@/features/node-browser/node-breadcrumbs';
 import { ErrorState } from '@/features/session/error-state';
+import { ShareDialog } from '@/features/share/share-dialog';
 import { formatBytes, formatTimestamp } from '@/lib/formatters';
 import type { NodeSource } from '@/lib/node-source';
 import { useContentUrl } from './use-content-url';
@@ -33,14 +35,21 @@ export function FilePreview({
   node,
   breadcrumbs,
   rootLabel,
+  canWrite,
 }: {
   source: NodeSource;
   node: NodeSummary;
   breadcrumbs: Breadcrumb[];
   rootLabel: string;
+  canWrite: boolean;
 }) {
   const content = useContentUrl(source, node.id);
   const downloads = useDownload(source);
+  const [sharing, setSharing] = useState(false);
+  // Sharing is owner-only, and only a room source ever carries that role
+  // (`node-source.ts`) — a share link resolves to `VIEWER`, so this is never null where
+  // the button below actually renders.
+  const roomId = source.kind === 'room' ? source.roomId : null;
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6">
@@ -59,6 +68,18 @@ export function FilePreview({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {canWrite && roomId ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setSharing(true);
+                }}
+              >
+                <Share2 />
+                Share
+              </Button>
+            ) : null}
             {/*
               Always offered, even while the preview is still loading or has failed: the
               download does not reuse the preview's URL and does not depend on it. That URL
@@ -126,6 +147,15 @@ export function FilePreview({
           </p>
         </div>
       )}
+
+      {roomId ? (
+        <ShareDialog
+          target={sharing ? { nodeId: node.id, name: node.name } : null}
+          roomId={roomId}
+          open={sharing}
+          onOpenChange={setSharing}
+        />
+      ) : null}
     </div>
   );
 }

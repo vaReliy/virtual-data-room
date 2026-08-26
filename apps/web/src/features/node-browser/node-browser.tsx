@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { FolderPlus } from 'lucide-react';
+import { FolderPlus, Share2 } from 'lucide-react';
 import type { NodeSummary } from '@dr/contracts';
 
 import { Button } from '@/components/ui/button';
+import { ShareDialog, type ShareTarget } from '@/features/share/share-dialog';
 import { UploadButton, UploadDropzone, uploadLimitsHint } from '@/features/upload/upload-dropzone';
 import { UploadQueuePanel } from '@/features/upload/upload-queue';
 import { useUploadQueue } from '@/features/upload/use-upload-queue';
@@ -71,6 +72,7 @@ export function NodeBrowser({
   const [renaming, setRenaming] = useState<NodeSummary | null>(null);
   const [deleting, setDeleting] = useState<NodeSummary | null>(null);
   const [moving, setMoving] = useState<NodeSummary | null>(null);
+  const [sharing, setSharing] = useState<ShareTarget | null>(null);
   // A drag has nowhere to put an error: the row it started from may already be gone from
   // the listing, and there is no dialog open to hold the message. So a failed drop reports
   // here, once, dismissibly. The dialog keeps its own failure inline.
@@ -87,6 +89,10 @@ export function NodeBrowser({
 
   const canWrite = role === 'OWNER';
   const totals = node ?? first.room ?? null;
+  // Sharing is an owner-only action, and only a room source ever carries that role
+  // (`node-source.ts`): a share link resolves to `VIEWER`, so this is never null where the
+  // share entry points below actually render.
+  const roomId = source.kind === 'room' ? source.roomId : null;
 
   async function moveTo(source: NodeSummary, destinationId: string | null) {
     await moveNode.mutateAsync({ id: source.id, parentId: destinationId });
@@ -106,9 +112,27 @@ export function NodeBrowser({
             <h1 className="text-xl font-semibold tracking-tight">{node?.name ?? rootLabel}</h1>
             {totals ? <p className="text-sm text-muted-foreground">{summarize(totals)}</p> : null}
           </div>
-          {canWrite ? (
+          {canWrite && roomId ? (
             <div className="flex items-center gap-2">
               <UploadButton onFiles={uploads.enqueue} />
+              {/*
+                The whole-room share (`nodeId: null`) has no row to open a menu on — this
+                toolbar is its only entry point, and only at the room root: inside a folder
+                the "Share" item on the ".." row's own listing is reached by sharing that
+                folder from wherever it is listed, not from here.
+              */}
+              {node === null ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setSharing({ nodeId: null, name: rootLabel });
+                  }}
+                >
+                  <Share2 />
+                  Share
+                </Button>
+              ) : null}
               <Button
                 size="sm"
                 onClick={() => {
@@ -156,6 +180,9 @@ export function NodeBrowser({
             onRename={setRenaming}
             onDelete={setDeleting}
             onMove={setMoving}
+            onShare={(node) => {
+              setSharing({ nodeId: node.id, name: node.name });
+            }}
             downloadingId={downloads.pendingId}
             onDownload={(node) => {
               // The banner holds one message. Clearing the other case here is what keeps
@@ -247,6 +274,17 @@ export function NodeBrowser({
           await deleteNode.mutateAsync(id);
         }}
       />
+
+      {roomId ? (
+        <ShareDialog
+          target={sharing}
+          roomId={roomId}
+          open={sharing !== null}
+          onOpenChange={(open) => {
+            if (!open) setSharing(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

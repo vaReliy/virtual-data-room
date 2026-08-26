@@ -1,6 +1,6 @@
 import { useState, type DragEvent } from 'react';
 import { Link } from 'react-router';
-import { CornerLeftUp, Download, File, Folder, MoreHorizontal } from 'lucide-react';
+import { CornerLeftUp, Download, File, Folder, MoreHorizontal, Share2 } from 'lucide-react';
 import type { NodeSummary } from '@dr/contracts';
 
 import { Button } from '@/components/ui/button';
@@ -55,6 +55,7 @@ export function NodeTable({
   onDelete,
   onMove,
   onDownload,
+  onShare,
   downloadingId,
   onDropMove,
 }: {
@@ -67,6 +68,7 @@ export function NodeTable({
   onDelete: (node: NodeSummary) => void;
   onMove: (node: NodeSummary) => void;
   onDownload: (node: NodeSummary) => void;
+  onShare: (node: NodeSummary) => void;
   /** The row whose presigned URL is being fetched, if any. */
   downloadingId: string | null;
   onDropMove: (source: NodeSummary, destination: NodeSummary) => void;
@@ -267,6 +269,16 @@ export function NodeTable({
                             }}
                           >
                             Rename
+                          </DropdownMenuItem>
+                        ) : null}
+                        {canWrite ? (
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              onShare(node);
+                            }}
+                          >
+                            <Share2 />
+                            Share
                           </DropdownMenuItem>
                         ) : null}
                         {/*

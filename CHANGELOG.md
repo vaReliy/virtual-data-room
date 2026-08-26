@@ -9,6 +9,46 @@ otherwise see.
 
 ## [Unreleased]
 
+### Added — Sharing: the web surface (Phase 4, issues 08.1, 08.2, 08.3)
+
+- **A `LINK` share's URL is unrecoverable by design, and the dialog is built around that.**
+  The token is stored hashed and the plaintext exists only in the response to the create
+  call, so `ShareDialog` never closes itself on success and shows a result view that says
+  the link cannot be shown again — the only way to replace a lost one is to revoke it and
+  create another. `ShareList` renders every live share with no control that could reveal an
+  existing URL: a link row shows only that it exists, when it was created and its expiry.
+- **`ShareDialog` is one component reused from three entry points** — a row's actions
+  dropdown, the room-root toolbar (`nodeId: null`, the whole-room share's only entry point),
+  and the file preview screen — all owner-only (`canWrite`). `NodeView` now passes
+  `canWrite={first.role === 'OWNER'}` down to `FilePreview`, which it did not carry before.
+- **Closing the dialog goes through one `close()` function, not Radix's `onOpenChange`
+  alone.** Radix only calls that callback for its own UI-driven close gestures (`Escape`,
+  backdrop, the corner button) — not when a parent sets the `open` prop programmatically,
+  which is what the "Done"/"Cancel" buttons do. Resetting `result` only in `onOpenChange`
+  left it stale after a button close, so sharing a different node right after showed the
+  previous share's link.
+- **`useRevokeShare`'s mutation folds a `410` into success in `mutationFn` itself.** Revoke
+  is idempotent at the API (a second `DELETE` returns `204`, not `410` — verified against
+  the running service, not assumed from the brief), and the fold means every caller,
+  including issue 09's cascade-revoke confirmation later, sees one outcome shape rather than
+  special-casing "already gone".
+- **"Shared with me" lives at `/`, the app's one resolver route, not a second navigation
+  target.** `HomeRoute` now fetches `GET /api/shares/shared-with-me` before deciding: an
+  empty result or a failed query redirects to the caller's own room exactly as before this
+  feature, and the screen renders only once there is at least one row — the redirect must
+  not race the query, or every owner with no shares would see a flash of an empty section.
+- **A row names the granted node, never the room — except a whole-room grant, where the
+  room *is* the grantee's scope.** This is enforced by the contract, not the component:
+  `sharedWithMeEntrySchema` carries no room name for a subtree grant, so there is nothing to
+  leak by fetching the room separately. `sharedBy` is shown beside the name because it is
+  what tells two similarly-named folders from two different counterparties apart.
+- Shared rooms are **not** added to `MeResponse.dataRooms` — that array is owner-bounded at
+  the repository and `SessionGate` reads an empty one as a provisioning error, not "nothing
+  shared yet".
+- `docs/manual-e2e.md` gained `SHR-01`–`SHR-05`, covering both share modes on a folder, a
+  file and the whole room; email normalization; a same-day expiry; listing and revoking
+  (including a double revoke); and the grantee's "Shared with me" view.
+
 ### Added — Sharing: the public link surface (Phase 4, issue 07)
 
 - **`TRUST_PROXY_HOPS` is a new environment variable, and removing it silently breaks a

@@ -159,6 +159,7 @@ export function NodeView({
         node={first.node}
         breadcrumbs={first.breadcrumbs}
         rootLabel={rootLabel}
+        canWrite={first.role === 'OWNER'}
       />
     );
   }
