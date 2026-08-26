@@ -115,6 +115,20 @@ export class ShareRepository {
   }
 
   /**
+   * Revokes several shares — a cascade, issue 09 — as one `UPDATE ... WHERE id IN (...)`.
+   * A single statement is already all-or-nothing in Postgres, which is what the brief's
+   * "cascade revokes in one transaction" asks for; no explicit `$transaction` adds
+   * anything a second query would need. Idempotent the same way `revoke` is: an id
+   * already revoked simply does not match `revokedAt: null` and is left alone.
+   */
+  async revokeMany(scope: AccessScope, shareIds: readonly string[]): Promise<void> {
+    await this.prisma.client.share.updateMany({
+      where: { id: { in: [...shareIds] }, dataRoomId: scope.dataRoomId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  /**
    * **Scope exception.** Every live `USER` grant held by one address in one room.
    *
    * It takes no `AccessScope` because it runs before one exists — producing one is its

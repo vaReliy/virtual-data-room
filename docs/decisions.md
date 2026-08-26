@@ -1009,3 +1009,48 @@ not as features:
   `@Global()`, so two arrays would be two providers racing for one token; the cost of one
   array is that each controller must `@SkipThrottle` the bucket that is not its own, and
   neither of those two lines is decoration.
+
+---
+
+## 31. Cascade revoke is a prompt, not a rule
+
+**Status:** Accepted, Phase 4 issue 09. Not a roadmap checkbox — the roadmap only says
+"Revoke" — and descopable on its own without touching anything else.
+
+**Context.** Access is derived from ancestry, so a `USER` grant on a folder already gives
+its grantee everything below it. A second grant to the same person on a file inside that
+folder is therefore redundant while the folder grant lives, and becomes load-bearing at the
+exact moment the folder grant is revoked: the nested row survives and keeps serving that one
+file. Two readings of "revoke" are both defensible — cascading matches deleting a folder in
+an operating system (what's inside goes with it); not cascading matches what the rows
+literally say (two independent grants, one revoked) — and guessing either way surprises
+somebody.
+
+**Decision.** Revoking a `USER` grant on a folder or the whole room, when the same grantee
+holds other live grants strictly beneath it, opens a confirmation naming the count and
+offering "Revoke all N" or "Revoke only this one" — neither styled as the default, because
+"Revoke all" destroys more than the one click asked for. Revoking a plain grant with nothing
+nested under it, or a `LINK` share, never prompts: a `LINK` has no grantee to group by and
+nothing nests under it.
+
+**Rationale.** A rule picked either way would be right for some rooms and wrong for others,
+silently. Asking costs one dialog and is asked only in the case that is actually ambiguous —
+most revokes have nothing nested beneath them and stay a single click.
+
+**Consequences.**
+
+- The nested count is computed once, in `ShareService.nestedLiveGrantShareIds`, and read
+  both by the share list (`ShareSummary.nestedLiveGrantCount`, for the dialog's wording) and
+  by the revoke itself (`ShareService.cascadeTargets`, for what actually gets revoked) — one
+  definition of "nested", so the number a caller was shown and what a cascade touches cannot
+  disagree.
+- A resolved node with `deletedAt` set is dropped before counting: `findGrantNodeInRoom` is
+  raw SQL and deliberately bypasses the soft-delete extension (that is what lets a grantee
+  see `410` rather than `404` on a deleted folder), so an unfiltered count would offer to
+  revoke a grant that already serves nothing.
+- A cascade revoke is one `UPDATE ... WHERE id IN (...)` (`ShareRepository.revokeMany`), not
+  a `$transaction` — a single statement is already all-or-nothing in Postgres, and a second
+  query would need one for a reason this cascade does not have.
+- `DELETE /api/rooms/:roomId/shares/:shareId` takes `?cascade=` rather than a second
+  endpoint, defaulting to `false`: a caller assembled before this issue landed does not
+  cascade by accident.

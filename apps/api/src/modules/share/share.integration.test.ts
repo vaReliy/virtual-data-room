@@ -45,7 +45,7 @@ describe('sharing against Postgres', () => {
     shareRepository = new ShareRepository(prisma);
     nodes = new NodeService(nodeRepository, dataRooms);
     accessControl = new AccessControlService(dataRooms, shareRepository, nodeRepository, users);
-    shares = new ShareService(shareRepository, nodes, users, {
+    shares = new ShareService(shareRepository, nodes, nodeRepository, users, {
       get: () => 'https://dataroom.example',
     } as unknown as ConfigService<Env, true>);
   });
@@ -166,7 +166,7 @@ describe('sharing against Postgres', () => {
     const { owner, grantee, room, ownerScope, legal } = await setUp();
     const share = await grant(ownerScope, owner.id, legal.id);
 
-    await shares.revoke(ownerScope, share.id);
+    await shares.revoke(ownerScope, share.id, false);
 
     await expect(accessControl.resolveForUser(grantee.id, room.id)).rejects.toBeInstanceOf(
       NotFoundException,
@@ -270,6 +270,75 @@ describe('sharing against Postgres', () => {
    * Decision #7's security requirement, one layer below the unit test that pins it: an
    * account registered on somebody else's address inherits nothing.
    */
+  /**
+   * Issue 09's whole reason to exist: a folder grant and a grant nested under it, for the
+   * same grantee. Revoking the folder without `cascade` leaves the nested one working;
+   * with it, both stop resolving.
+   */
+  describe('cascade revoke', () => {
+    it('reports the nested grant in the list, and a plain revoke leaves it working', async () => {
+      const { owner, grantee, room, ownerScope, legal, nda } = await setUp();
+      await grant(ownerScope, owner.id, legal.id);
+      await grant(ownerScope, owner.id, nda.id);
+
+      const list = await shares.listForNode(ownerScope, legal.id);
+      expect(list).toHaveLength(1);
+      expect(list[0]?.nestedLiveGrantCount).toBe(1);
+
+      await shares.revoke(ownerScope, list[0]?.id ?? '', false);
+
+      const granteeScope = await accessControl.resolveForUser(grantee.id, room.id);
+      expect(granteeScope.rootNodeId).toBe(nda.id);
+    });
+
+    it('cascades: revoking the folder grant also revokes the one nested under it', async () => {
+      const { owner, grantee, room, ownerScope, legal, nda } = await setUp();
+      const legalGrant = await grant(ownerScope, owner.id, legal.id);
+      await grant(ownerScope, owner.id, nda.id);
+
+      await shares.revoke(ownerScope, legalGrant.id, true);
+
+      await expect(accessControl.resolveForUser(grantee.id, room.id)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('does not count a sibling folder whose name merely shares a prefix', async () => {
+      const { owner, ownerScope, legal } = await setUp();
+      const legalArchive = await nodes.createFolder(
+        ownerScope,
+        { parentId: null, name: 'Legal Archive' },
+        owner.id,
+      );
+      await grant(ownerScope, owner.id, legal.id);
+      await grant(ownerScope, owner.id, legalArchive.id);
+
+      const list = await shares.listForNode(ownerScope, legal.id);
+      expect(list[0]?.nestedLiveGrantCount).toBe(0);
+    });
+
+    it('does not count a grant on a folder the owner has already deleted', async () => {
+      const { owner, ownerScope, legal, nda } = await setUp();
+      await grant(ownerScope, owner.id, legal.id);
+      await grant(ownerScope, owner.id, nda.id);
+      await nodes.deleteSubtree(ownerScope, nda.id);
+
+      const list = await shares.listForNode(ownerScope, legal.id);
+      expect(list[0]?.nestedLiveGrantCount).toBe(0);
+    });
+
+    it('never cascades a LINK share', async () => {
+      const { owner, ownerScope, legal, nda } = await setUp();
+      const link = await shares.create(ownerScope, { nodeId: legal.id, mode: 'LINK' }, owner.id);
+      await grant(ownerScope, owner.id, nda.id);
+
+      await shares.revoke(ownerScope, link.id, true);
+
+      // Still live: a LINK revoke never touches anything beneath it, cascade or not.
+      expect(await shares.listForNode(ownerScope, nda.id)).toHaveLength(1);
+    });
+  });
+
   it('matches nothing for an unverified address', async () => {
     const { owner, room, ownerScope, legal } = await setUp();
     const unverified = await users.upsertFromGoogle({

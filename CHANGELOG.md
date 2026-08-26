@@ -9,6 +9,30 @@ otherwise see.
 
 ## [Unreleased]
 
+### Added — Cascade revoke with confirmation (Phase 4, issue 09)
+
+- **Revoking a `USER` grant on a folder or the whole room now offers to take everything
+  nested beneath it with it**, when the same grantee holds other live grants there — a
+  confirmation names the count and offers "Revoke all N" or "Revoke only this one", neither
+  styled as the default. See `docs/decisions.md` #31 for why this is a prompt rather than a
+  rule in either direction.
+- **`DELETE /api/rooms/:roomId/shares/:shareId` gained `?cascade=`** (`cascadeQuerySchema`
+  in `@dr/contracts`), default `false`; an unknown value is a `400`, the same as any other
+  client-assembled query parameter in this codebase.
+- **`ShareSummary` gained `nestedLiveGrantCount`, optional.** Computed only for a `USER`
+  grant on a folder or the whole room, by `ShareService.nestedLiveGrantShareIds` — the same
+  method the cascade revoke itself calls, so the number a caller sees and what a cascade
+  actually touches cannot disagree. A grant whose node the owner has already soft-deleted is
+  dropped before counting: `findGrantNodeInRoom` bypasses the soft-delete extension on
+  purpose (that is what lets a grantee see `410` rather than `404`), so an unfiltered count
+  would offer to revoke a grant already serving nothing.
+- **No new raw SQL.** The nested search reuses `ShareRepository.findLiveGrantsForEmail` and
+  `NodeRepository.findGrantNodeInRoom`, looping over the grantee's handful of grants in the
+  room rather than a path-prefix join — that join would have needed a new statement in
+  `node.repository.ts`, mixing a share query into the node repository.
+- **`ShareRepository.revokeMany`** revokes several shares as one `UPDATE ... WHERE id IN
+  (...)` — atomic by itself, so no `$transaction` was added for it.
+
 ### Added — Row-menu icons, and "Shared with me" becomes its own route (Phase 4, issue 08.4)
 
 - **Every row-menu item now has an icon.** Rename got `Pencil`, Move got `FolderInput`, and

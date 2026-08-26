@@ -23,9 +23,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError, NetworkError, apiSend } from '@/lib/api-client';
-import { formatTimestamp } from '@/lib/formatters';
+import { formatTimestamp, pluralize } from '@/lib/formatters';
 import { queryKeys } from '@/lib/query-keys';
-import { useRevokeShare, useShares } from './use-shares';
+import { useRevokeShare, useShares, type RevokeShareInput } from './use-shares';
 
 /** What the dialog is about to share. `nodeId: null` is the whole Data Room. */
 export type ShareTarget = { nodeId: string | null; name: string };
@@ -65,14 +65,109 @@ function describeListFailure(error: Error): string {
   return error.message;
 }
 
+/**
+ * Confirms a cascade revoke (issue 09): `share` is a live `USER` grant on a folder or the
+ * whole room that has other live grants for the same grantee nested beneath it. Cascading
+ * is a prompt rather than a rule because neither outcome is obviously right — see
+ * `docs/decisions.md` — so the dialog states the count and puts neither button forward as
+ * the default: "Revoke all" destroys more than the one click asked for, and must not win
+ * by inertia.
+ *
+ * `LINK` shares and grants with nothing nested under them never reach this dialog —
+ * `ShareRow` calls `revoke` directly for those.
+ */
+function CascadeRevokeDialog({
+  share,
+  onCancel,
+  onConfirm,
+}: {
+  share: ShareSummary | null;
+  onCancel: () => void;
+  onConfirm: (cascade: boolean) => Promise<void>;
+}) {
+  const [pending, setPending] = useState<'all' | 'one' | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  if (!share) return null;
+  const nested = share.nestedLiveGrantCount ?? 0;
+  const grantee = share.granteeEmail ?? 'This grantee';
+
+  async function handle(cascade: boolean, which: 'all' | 'one') {
+    setPending(which);
+    setFailure(null);
+    try {
+      await onConfirm(cascade);
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : String(error));
+      setPending(null);
+    }
+  }
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next && pending === null) onCancel();
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Revoke access for {grantee}?</DialogTitle>
+          <DialogDescription>
+            {grantee} also has {pluralize(nested, 'grant')} inside this folder. Revoking this
+            one leaves {nested === 1 ? 'it' : 'them'} working.
+          </DialogDescription>
+        </DialogHeader>
+
+        {failure ? (
+          <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {failure}
+          </p>
+        ) : null}
+
+        <DialogFooter className="flex-col gap-2 sm:flex-col sm:space-x-0">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={pending !== null}
+            onClick={() => {
+              void handle(false, 'one');
+            }}
+          >
+            {pending === 'one' ? 'Revoking…' : 'Revoke only this one'}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={pending !== null}
+            onClick={() => {
+              void handle(true, 'all');
+            }}
+          >
+            {pending === 'all' ? 'Revoking…' : `Revoke all ${String(nested + 1)}`}
+          </Button>
+          <Button type="button" variant="ghost" disabled={pending !== null} onClick={onCancel}>
+            Cancel
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** One live share, and its revoke control. Never renders anything that looks like it could
- * reveal a `LINK` share's URL — the plaintext exists only in the moment it was created. */
+ * reveal a `LINK` share's URL — the plaintext exists only in the moment it was created.
+ *
+ * A grant with `nestedLiveGrantCount` above zero does not revoke on click — it hands the
+ * share to `onRequestCascade` so the confirmation dialog (issue 09) can ask first. */
 function ShareRow({
   share,
   revoke,
+  onRequestCascade,
 }: {
   share: ShareSummary;
-  revoke: (shareId: string) => Promise<void>;
+  revoke: (input: RevokeShareInput) => Promise<void>;
+  onRequestCascade: (share: ShareSummary) => void;
 }) {
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -85,10 +180,14 @@ function ShareRow({
     .join(' · ');
 
   async function handleRevoke() {
+    if ((share.nestedLiveGrantCount ?? 0) > 0) {
+      onRequestCascade(share);
+      return;
+    }
     setPending(true);
     setFailure(null);
     try {
-      await revoke(share.id);
+      await revoke({ shareId: share.id });
     } catch (error) {
       setFailure(error instanceof Error ? error.message : String(error));
     } finally {
@@ -138,6 +237,21 @@ function ShareRow({
 function ShareList({ roomId, nodeId }: { roomId: string; nodeId: string | null }) {
   const shares = useShares(roomId, nodeId);
   const revoke = useRevokeShare(roomId, nodeId);
+  const [cascadeTarget, setCascadeTarget] = useState<ShareSummary | null>(null);
+
+  const cascadeDialog = (
+    <CascadeRevokeDialog
+      share={cascadeTarget}
+      onCancel={() => {
+        setCascadeTarget(null);
+      }}
+      onConfirm={async (cascade) => {
+        if (!cascadeTarget) return;
+        await revoke.mutateAsync({ shareId: cascadeTarget.id, cascade });
+        setCascadeTarget(null);
+      }}
+    />
+  );
 
   if (shares.isPending) {
     return (
@@ -161,11 +275,19 @@ function ShareList({ roomId, nodeId }: { roomId: string; nodeId: string | null }
   }
 
   return (
-    <ul className="divide-y">
-      {shares.data.map((share) => (
-        <ShareRow key={share.id} share={share} revoke={revoke.mutateAsync} />
-      ))}
-    </ul>
+    <>
+      <ul className="divide-y">
+        {shares.data.map((share) => (
+          <ShareRow
+            key={share.id}
+            share={share}
+            revoke={revoke.mutateAsync}
+            onRequestCascade={setCascadeTarget}
+          />
+        ))}
+      </ul>
+      {cascadeDialog}
+    </>
   );
 }
 

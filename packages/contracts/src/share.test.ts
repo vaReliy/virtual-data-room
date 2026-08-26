@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createShareBodySchema } from './share';
+import { cascadeQuerySchema, createShareBodySchema, shareSummarySchema } from './share';
 
 /**
  * The schema is where `shares_mode_check` is enforced *first*. Every combination the
@@ -39,5 +39,45 @@ describe('createShareBodySchema', () => {
 
   it('accepts a whole-room share, which is what nodeId: null means', () => {
     expect(createShareBodySchema.parse({ nodeId: null, mode: 'LINK' }).nodeId).toBeNull();
+  });
+});
+
+/**
+ * The query param issue 09 adds to `DELETE /shares/:shareId`. Assembled by our own
+ * client, so it defaults rather than requiring every caller to spell out `false`.
+ */
+describe('cascadeQuerySchema', () => {
+  it('defaults to false, so a caller that does not know about cascading does not cascade', () => {
+    expect(cascadeQuerySchema.parse(undefined)).toBe(false);
+  });
+
+  it('parses the two values the client ever sends', () => {
+    expect(cascadeQuerySchema.parse('true')).toBe(true);
+    expect(cascadeQuerySchema.parse('false')).toBe(false);
+  });
+
+  it('rejects anything else rather than silently defaulting', () => {
+    expect(cascadeQuerySchema.safeParse('1').success).toBe(false);
+    expect(cascadeQuerySchema.safeParse('True').success).toBe(false);
+  });
+});
+
+describe('shareSummarySchema', () => {
+  const base = {
+    id: '11111111-2222-4333-8444-555555555555',
+    nodeId: null,
+    mode: 'LINK' as const,
+    role: 'VIEWER' as const,
+    granteeEmail: null,
+    expiresAt: null,
+    createdAt: new Date().toISOString(),
+  };
+
+  it('parses a response with no nestedLiveGrantCount, so an older or non-computing caller is unaffected', () => {
+    expect(shareSummarySchema.parse(base).nestedLiveGrantCount).toBeUndefined();
+  });
+
+  it('parses a response that does compute it', () => {
+    expect(shareSummarySchema.parse({ ...base, nestedLiveGrantCount: 2 }).nestedLiveGrantCount).toBe(2);
   });
 });

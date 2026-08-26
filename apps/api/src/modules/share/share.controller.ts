@@ -14,6 +14,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
+  cascadeQuerySchema,
   createShareBodySchema,
   uuidSchema,
   type CreateShareBody,
@@ -82,15 +83,21 @@ export class ShareController {
     return this.shares.listForNode(scope, nodeId ?? null);
   }
 
+  /**
+   * `?cascade=true` (issue 09) also revokes every other live `USER` grant the same
+   * grantee holds strictly beneath this share's node. Default `false`, so a caller that
+   * does not know about the feature does not cascade.
+   */
   @Delete(':shareId')
   @HttpCode(HttpStatus.NO_CONTENT)
   async revoke(
     @Req() request: AuthenticatedRequest,
     @Param('roomId', ParseUUIDPipe) roomId: string,
     @Param('shareId', ParseUUIDPipe) shareId: string,
+    @Query('cascade', new ZodQueryPipe(cascadeQuerySchema)) cascade: boolean,
   ): Promise<void> {
     const scope = await this.accessControl.resolveForUser(sessionOf(request).userId, roomId);
-    await this.shares.revoke(scope, shareId);
+    await this.shares.revoke(scope, shareId, cascade);
   }
 }
 

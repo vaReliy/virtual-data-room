@@ -74,6 +74,14 @@ export type CreateShareBody = z.infer<typeof createShareBodySchema>;
  * its SHA-256 is stored. No response shaped like this can leak one, and no endpoint can be
  * added later to recover a lost link without defeating the reason it is hashed.
  */
+/**
+ * How many other live `USER` grants the same grantee holds strictly beneath this one —
+ * the number issue 09's cascade-revoke confirmation states. Populated only for a `USER`
+ * grant on a folder or the whole room, where nesting is possible; absent otherwise
+ * (`LINK` shares, and grants nothing can nest under). Optional rather than required, so
+ * a response that does not compute it — none does yet outside the owner's share list —
+ * still parses instead of failing with "Unexpected response shape".
+ */
 export const shareSummarySchema = z.object({
   id: uuidSchema,
   nodeId: uuidSchema.nullable(),
@@ -82,8 +90,22 @@ export const shareSummarySchema = z.object({
   granteeEmail: z.string().nullable(),
   expiresAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),
+  nestedLiveGrantCount: z.number().int().nonnegative().optional(),
 });
 export type ShareSummary = z.infer<typeof shareSummarySchema>;
+
+/**
+ * `?cascade=` on `DELETE /api/rooms/:roomId/shares/:shareId`. Assembled by our own
+ * client, so an unknown value is a malformed request (`400` via `ZodQueryPipe`), not a
+ * person's typo — the same reasoning `contentDispositionQuerySchema` documents.
+ *
+ * Default is `false`: a caller that does not know about cascading must not cascade.
+ */
+export const cascadeQuerySchema = z
+  .enum(['true', 'false'])
+  .default('false')
+  .transform((value) => value === 'true');
+export type CascadeQuery = z.infer<typeof cascadeQuerySchema>;
 
 /**
  * The create response, and **the only place a token ever crosses the wire**.
