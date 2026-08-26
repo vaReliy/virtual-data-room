@@ -9,6 +9,27 @@ otherwise see.
 
 ## [Unreleased]
 
+### Added — The `..` row (Phase 4, issue 03)
+
+- **A pinned first row in the folder table that navigates one level up**
+  (`features/node-browser/node-table.tsx`), rendered outside `nodes.map` — no size,
+  contents, date or actions dropdown, and no drag handlers, so it cannot accidentally
+  satisfy `accepts()` as a drop target.
+- **The destination is `node.parentId`, never anything derived.** `parentId` is `null`
+  both at the caller's Access Scope root and at the room root, so the row disappears
+  exactly where climbing must stop — a node above the caller's scope stays
+  indistinguishable from one that does not exist. `MoveNodeDialog`'s "Up one folder"
+  already relied on the same field; this row matches its `aria-label` wording.
+- The link's visible text is `..`, but its accessible name is "Up one folder" — a screen
+  reader announces the destination, not two dots.
+- **An empty folder still offers the `..` row.** Issue 03 originally called for
+  `EmptyFolderState` to fully replace the table on an empty listing, which would have
+  taken the row with it — a dead end with no gesture back up but the breadcrumb. Revised
+  during review: `NodeBrowser` now falls back to the standalone placard only at the room
+  root (`node === null`, where there is no `..` destination to offer either way);
+  everywhere else `NodeTable` renders the `..` row plus an in-table "this folder is empty"
+  message, so climbing out never depends on remembering the breadcrumb is there.
+
 ### Added — Download a file (Phase 4, issue 05)
 
 - **`GET /api/rooms/:roomId/nodes/:nodeId/content?disposition=inline|attachment`.** The

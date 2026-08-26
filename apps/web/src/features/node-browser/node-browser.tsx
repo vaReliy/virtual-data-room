@@ -142,11 +142,14 @@ export function NodeBrowser({
         presentation; the service still asserts the role).
       */}
       <UploadDropzone onFiles={uploads.enqueue} disabled={!canWrite}>
-        {children.length === 0 ? (
+        {node === null && children.length === 0 ? (
+          // At the room root there is no `..` row to offer — `node` is already `null` — so
+          // an empty listing has nothing for a table to show at all.
           <EmptyFolderState />
         ) : (
           <NodeTable
             roomId={roomId}
+            node={node}
             nodes={children}
             canWrite={canWrite}
             onRename={setRenaming}

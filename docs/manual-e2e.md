@@ -168,6 +168,9 @@ the session cookie by hand to simulate the end state.
 1. Open a folder with no children.
    - Expected: an empty-state message, not a blank area and not an error.
    - Expected: the toolbar still offers creating a folder and uploading.
+   - Expected: a `..` row is still there, above the message — an empty folder must not be a
+     dead end. This holds only for a folder; at the room root there is no `..` row to show
+     (`node` is `null` there too, so the plain placard is all there is).
 
 ### NAV-05 — A slow load shows placeholders, not a blank page **[state]**
 
@@ -187,6 +190,23 @@ the session cookie by hand to simulate the end state.
      are different situations.
 2. Start the API and use the retry control.
    - Expected: the content loads without a full page reload.
+
+### NAV-07 — The `..` row climbs one level
+
+**Preconditions:** a folder with a subfolder holding at least one child, all owned (or, for
+a share recipient, the subfolder sits below their scope root).
+
+1. Open the room root.
+   - Expected: no `..` row — this is already the top of what the caller can see.
+2. Open a folder, then open its subfolder.
+   - Expected: the subfolder's list opens with a `..` row pinned first, before every real
+     row — no size, contents, date or actions menu on it.
+   - Expected: this holds even when the subfolder is empty — see NAV-04.
+3. Activate the `..` row by keyboard (tab to it, then Enter).
+   - Expected: it lands one level up, at the folder from step 2, and a screen reader
+     announces it as a link to the parent folder, not as two dots.
+4. For a share recipient scoped to that subfolder: open it directly.
+   - Expected: no `..` row — this is their scope root, indistinguishable from the room root.
 
 ---
 

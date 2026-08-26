@@ -1,6 +1,6 @@
 import { useState, type DragEvent } from 'react';
 import { Link } from 'react-router';
-import { Download, File, Folder, MoreHorizontal } from 'lucide-react';
+import { CornerLeftUp, Download, File, Folder, MoreHorizontal } from 'lucide-react';
 import type { NodeSummary } from '@dr/contracts';
 
 import { Button } from '@/components/ui/button';
@@ -47,6 +47,7 @@ function sizeOf(node: NodeSummary): string {
 
 export function NodeTable({
   roomId,
+  node,
   nodes,
   canWrite,
   onRename,
@@ -57,6 +58,8 @@ export function NodeTable({
   onDropMove,
 }: {
   roomId: string;
+  /** The folder whose children are `nodes` — `null` at the caller's scope root. */
+  node: NodeSummary | null;
   nodes: NodeSummary[];
   canWrite: boolean;
   onRename: (node: NodeSummary) => void;
@@ -114,6 +117,43 @@ export function NodeTable({
           </TableRow>
         </TableHeader>
         <TableBody>
+          {node ? (
+            // Pinned first, outside `nodes.map`: not a node, so no size, date, contents or
+            // actions dropdown, and no drag handlers — it must not accidentally satisfy
+            // `accepts()`. The destination is `node.parentId`, nulled at the caller's scope
+            // root exactly like at the room root, so the row disappears exactly where
+            // climbing must stop rather than pointing at a parent the caller cannot see.
+            <TableRow>
+              <TableCell className="font-medium">
+                <div className="flex items-center gap-2">
+                  <CornerLeftUp className="size-4 shrink-0 text-muted-foreground" />
+                  <Link
+                    to={node.parentId ? `/rooms/${roomId}/n/${node.parentId}` : `/rooms/${roomId}`}
+                    aria-label="Up one folder"
+                    className="text-muted-foreground underline-offset-4 hover:underline"
+                  >
+                    ..
+                  </Link>
+                </div>
+              </TableCell>
+              <TableCell className="hidden sm:table-cell" />
+              <TableCell className="hidden sm:table-cell" />
+              <TableCell className="hidden md:table-cell" />
+              <TableCell />
+            </TableRow>
+          ) : null}
+          {nodes.length === 0 ? (
+            // The `..` row above is still a real way out of an empty folder — this is not
+            // an error, just nothing to list. Room root reaches this only through the
+            // `node === null` branch in `NodeBrowser`, which renders `EmptyFolderState`
+            // instead of this table, so this message never appears without the `..` row
+            // above it.
+            <TableRow>
+              <TableCell colSpan={5} className="py-14 text-center text-sm text-muted-foreground">
+                This folder is empty.
+              </TableCell>
+            </TableRow>
+          ) : null}
           {nodes.map((node) => {
             // Files only. A folder-move UI is out of scope for this phase — the endpoint is
             // type-agnostic and would serve it, but `BRIEF.md` asks for moving a file and
