@@ -9,6 +9,39 @@ otherwise see.
 
 ## [Unreleased]
 
+### Fixed — Folder contents no longer change height between states (Phase 4, issue 04)
+
+- **`UploadDropzone`'s wrapper is now a `flex flex-col min-h-(--browser-frame-min-height)`
+  container** (`features/upload/upload-dropzone.tsx`), not a bare `relative` div. Its drag
+  overlay is `absolute inset-0`, so before this it was exactly the size of whatever it
+  wrapped — over a one-file folder (90px) that meant a 24px icon and two lines of text
+  fighting for space. The overlay is legible now because its parent has a floor, not
+  because the overlay itself changed.
+- **`--browser-frame-min-height: 250px` is one CSS custom property** (`index.css`), not a
+  `min-h-[250px]` repeated in every file that needs the floor. `NodeTableSkeleton` must
+  independently reach the exact same height as the dropzone (see below), so a literal
+  copied into both places would silently drift the day either one is tweaked. It is a
+  plain `:root` variable, not an entry in the default spacing scale, because that scale
+  backs every `p-*`, `m-*` and `gap-*` utility in the app — this is one layout constant,
+  not a scale to extend.
+- **Both things the dropzone can wrap now stretch to fill it**: `Placard`
+  (`node-browser/browser-states.tsx`, used by `EmptyFolderState`) gained `flex-1
+  justify-center`, and the table's outer bordered box (`node-browser/node-table.tsx`)
+  gained `flex flex-1 flex-col`. A folder with rows stays pinned to the top of that box;
+  the leftover space is blank and still inside the frame, and still a valid drop target.
+- **`NodeTableSkeleton` reaches the same floor independently** — it renders during
+  `browse.isPending`, outside `UploadDropzone` entirely, so it cannot inherit the fix from
+  either of the above and needed its own `min-h-(--browser-frame-min-height)` plus
+  vertical centring.
+- **The in-table "this folder is empty" message moved out of the table.** It was a
+  `colSpan={5}` row with fixed `py-14` padding, which meant it hugged the top of the box
+  under the `..` row with dead space below rather than centring like `EmptyFolderState`
+  does at the room root. It is now a plain `flex-1 flex items-center justify-center`
+  `div` rendered after `</Table>`, a sibling of the table rather than a row inside it —
+  the `..` row is still a real table row above it, but the message itself grows to fill
+  whatever height is left and centres in it, matching the room-root placard instead of
+  reading as a second, shorter kind of "empty."
+
 ### Added — The `..` row (Phase 4, issue 03)
 
 - **A pinned first row in the folder table that navigates one level up**

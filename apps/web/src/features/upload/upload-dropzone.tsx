@@ -87,7 +87,7 @@ export function UploadDropzone({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className="relative"
+      className="relative flex min-h-(--browser-frame-min-height) flex-col"
     >
       {children}
       {over ? (

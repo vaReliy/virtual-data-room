@@ -208,6 +208,20 @@ a share recipient, the subfolder sits below their scope root).
 4. For a share recipient scoped to that subfolder: open it directly.
    - Expected: no `..` row — this is their scope root, indistinguishable from the room root.
 
+### NAV-08 — The frame does not jump between empty, loaded and loading
+
+1. Open an empty folder, then a folder holding exactly one file, then a folder holding
+   many files, noting the height of the bordered box each time.
+   - Expected: all three sit at the same height — nothing above or below it moves as you
+     switch between them.
+2. Reload a folder on a throttled connection so the loading skeleton is visible before the
+   content replaces it.
+   - Expected: the skeleton sits at that same height too — the page does not jump a second
+     time when the real content arrives.
+3. Drag a file over a folder holding exactly one row.
+   - Expected: the drag overlay covers the full frame, not just the one row, and its icon
+     and both lines of text are fully legible inside it.
+
 ---
 
 ## Upload

@@ -102,7 +102,7 @@ export function NodeTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border">
+    <div className="flex flex-1 flex-col overflow-x-auto rounded-lg border">
       <Table>
         <TableHeader>
           <TableRow>
@@ -140,18 +140,6 @@ export function NodeTable({
               <TableCell className="hidden sm:table-cell" />
               <TableCell className="hidden md:table-cell" />
               <TableCell />
-            </TableRow>
-          ) : null}
-          {nodes.length === 0 ? (
-            // The `..` row above is still a real way out of an empty folder — this is not
-            // an error, just nothing to list. Room root reaches this only through the
-            // `node === null` branch in `NodeBrowser`, which renders `EmptyFolderState`
-            // instead of this table, so this message never appears without the `..` row
-            // above it.
-            <TableRow>
-              <TableCell colSpan={5} className="py-14 text-center text-sm text-muted-foreground">
-                This folder is empty.
-              </TableCell>
             </TableRow>
           ) : null}
           {nodes.map((node) => {
@@ -313,6 +301,19 @@ export function NodeTable({
           })}
         </TableBody>
       </Table>
+      {nodes.length === 0 ? (
+        // Outside the table, not a `colSpan` row: the `..` row above stays pinned at its
+        // natural height, and this message is free to grow with `flex-1` and centre in
+        // whatever height that leaves — the same treatment `EmptyFolderState` gives the
+        // room root, so the two read as one message rather than two different heights of
+        // "nothing here" depending on how deep the caller is. Room root reaches this only
+        // through the `node === null` branch in `NodeBrowser`, which renders
+        // `EmptyFolderState` instead of this table, so this message never appears without
+        // the `..` row above it.
+        <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-muted-foreground">
+          This folder is empty.
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -323,7 +324,7 @@ export function NodeTable({
  */
 export function NodeTableSkeleton() {
   return (
-    <div className="rounded-lg border">
+    <div className="flex min-h-(--browser-frame-min-height) flex-col justify-center rounded-lg border">
       <div className="space-y-4 p-4">
         {Array.from({ length: 4 }, (_, index) => (
           <div key={index} className="flex items-center gap-3">

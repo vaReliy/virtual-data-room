@@ -81,6 +81,14 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /*
+   * The floor every folder-contents state — empty placard, one row, many rows, the
+   * loading skeleton — sits at, so switching between them never moves the page (Phase 4,
+   * issue 04). One value, not the default spacing scale: that scale drives every `p-*`,
+   * `m-*` and `gap-*` in the app, and this is a single layout constant, not a scale.
+   */
+  --browser-frame-min-height: 250px;
 }
 
 .dark {
