@@ -27,6 +27,15 @@ instead of living under `nodes`: a folder is created by one statement, a file by
 protocol. Presign takes a batch because its limits are set-level; complete is per file,
 because every file lands at its own moment and fails on its own terms.
 
+**Activity** — the visible log of what the signed-in user has just done in this session:
+a file uploading, a node moved, a link shared. It is client-only and lives for as long as
+the tab does — deliberately **not** a *Notification* (which promises delivery, read state
+and a server-side inbox) and **not** an *audit log* (which is a durable record of who
+touched what, and is out of scope). An entry is either *settled* or still *in flight*, and
+only settled entries can be cleared: an operation still running must stay on screen until
+it finishes or fails. The upload queue is one kind of Activity entry, not a separate
+surface.
+
 **Share** — a grant of access, attached to a Node (or to a whole Data Room). Two
 `mode`s: `LINK` (anyone holding the URL) and `USER` (a specific email address). Carries
 a `role`. A share is never copied onto descendants — access to nested content is
