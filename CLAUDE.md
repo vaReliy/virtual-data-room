@@ -21,6 +21,7 @@ Load only what the task needs — these are not all required at once.
 | `docs/data-model.md`   | Schema work, migrations, queries, indexes, invariants.                                                   |
 | `docs/architecture.md` | Layers, access control, upload flow, error contract, folder layout.                                      |
 | `docs/roadmap.md`      | Always, before picking up work. Task-level plan, per-phase scope, descope order.                         |
+| `docs/manual-e2e.md`   | Before walking the app by hand or driving it through the browser MCP. Behaviour-level cases, no selectors — update it when behaviour changes, not when markup does. |
 
 ## Rules
 
