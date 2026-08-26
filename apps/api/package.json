@@ -17,6 +17,8 @@
     "db:reset": "prisma migrate reset"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1113.0",
+    "@aws-sdk/s3-request-presigner": "3.1113.0",
     "@dr/contracts": "workspace:*",
     "@nestjs/common": "11.2.1",
     "@nestjs/config": "4.0.4",
@@ -24,6 +26,7 @@
     "@nestjs/jwt": "11.0.2",
     "@nestjs/passport": "11.0.5",
     "@nestjs/platform-express": "11.2.1",
+    "@nestjs/throttler": "6.5.0",
     "@prisma/adapter-pg": "7.9.1",
     "@prisma/client": "7.9.1",
     "cookie-parser": "1.4.7",

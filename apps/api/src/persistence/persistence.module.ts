@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 
 import { UserRepository } from '../modules/auth/user.repository';
 import { DataRoomRepository } from '../modules/data-room/data-room.repository';
+import { BlobRepository } from '../modules/file/blob.repository';
 import { NodeRepository } from '../modules/node/node.repository';
 import { PrismaService } from './prisma.service';
+import { TransactionRunner } from './transaction.runner';
 
 /**
  * `PrismaService` is provided here and **deliberately not exported**, so no feature
@@ -17,7 +19,20 @@ import { PrismaService } from './prisma.service';
  * boundary allows `*.repository.ts` and this directory, and nothing else.
  */
 @Module({
-  providers: [PrismaService, UserRepository, DataRoomRepository, NodeRepository],
-  exports: [UserRepository, DataRoomRepository, NodeRepository],
+  providers: [
+    PrismaService,
+    TransactionRunner,
+    UserRepository,
+    DataRoomRepository,
+    NodeRepository,
+    BlobRepository,
+  ],
+  exports: [
+    TransactionRunner,
+    UserRepository,
+    DataRoomRepository,
+    NodeRepository,
+    BlobRepository,
+  ],
 })
 export class PersistenceModule {}

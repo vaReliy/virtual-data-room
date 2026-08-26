@@ -107,8 +107,8 @@ export type BrowseResponse = z.infer<typeof browseResponseSchema>;
  * `POST /api/rooms/:roomId/nodes` — create a folder.
  *
  * There is no `type` field: Phase 2 creates folders only, and a `FILE` node is born in
- * `POST /api/uploads/complete`, never here, because it cannot exist without a `READY`
- * blob. `parentId: null` means the caller's scope root.
+ * `POST /api/rooms/:roomId/uploads/complete`, never here, because it cannot exist without
+ * a `READY` blob. `parentId: null` means the caller's scope root.
  */
 export const createFolderBodySchema = z.object({
   parentId: uuidSchema.nullable(),
@@ -121,3 +121,18 @@ export const renameNodeBodySchema = z.object({
   name: nodeNameSchema,
 });
 export type RenameNodeBody = z.infer<typeof renameNodeBodySchema>;
+
+/**
+ * `POST /api/rooms/:roomId/nodes/:nodeId/move` — a dedicated sub-resource, not a field on
+ * `PATCH`.
+ *
+ * Folding `parentId` into the rename body makes `{ "parentId": null }` — move to the room
+ * root — indistinguishable from a `parentId` the client simply did not send, which is the
+ * difference between relocating a node and leaving it alone. The operation is also not a
+ * field write: it rewrites every descendant's `path` and transfers aggregates between two
+ * ancestor chains.
+ */
+export const moveNodeBodySchema = z.object({
+  parentId: uuidSchema.nullable(),
+});
+export type MoveNodeBody = z.infer<typeof moveNodeBodySchema>;

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { DataRoomIdentity, DataRoomSummary } from '@dr/contracts';
 
 import type { AccessScope } from '../../access/access-scope';
-import { PrismaService } from '../../persistence/prisma.service';
+import { PrismaService, type TransactionClient } from '../../persistence/prisma.service';
 
 /**
  * Data Rooms owned by a given user.
@@ -56,6 +56,22 @@ export class DataRoomRepository {
       select: this.selection,
     });
     return room ? this.toSummary(room) : null;
+  }
+
+  /**
+   * The room's used bytes, read **inside the caller's transaction**.
+   *
+   * This is the authoritative half of the quota check. The advisory number computed at
+   * presign gives fast feedback over a whole batch and is deliberately not trusted: minutes
+   * pass while the browser transfers the bytes, and other uploads land in between. Reading
+   * it here, after `lockDataRoom`, is what makes the answer true at the moment it is used.
+   */
+  async usedBytesInTransaction(tx: TransactionClient, scope: AccessScope): Promise<number> {
+    const room = await tx.dataRoom.findFirstOrThrow({
+      where: { id: scope.dataRoomId },
+      select: { totalSize: true },
+    });
+    return Number(room.totalSize);
   }
 
   async countOwnedBy(ownerId: string): Promise<number> {

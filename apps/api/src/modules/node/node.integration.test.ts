@@ -1,16 +1,23 @@
 import { randomUUID } from 'node:crypto';
 
-import { ConflictException, GoneException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  GoneException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import type { NodeType } from '@dr/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { AccessControlService } from '../../access/access-control.service';
 import type { AccessScope } from '../../access/access-scope';
 import type { PrismaService } from '../../persistence/prisma.service';
+import { TransactionRunner } from '../../persistence/transaction.runner';
 import { createTestPrisma } from '../../test-support/database';
 import { FixturesRepository } from '../../test-support/fixtures.repository';
 import { UserRepository } from '../auth/user.repository';
 import { DataRoomRepository } from '../data-room/data-room.repository';
+import { BlobRepository } from '../file/blob.repository';
 import { NodeRepository } from './node.repository';
 import { NodeService } from './node.service';
 
@@ -32,6 +39,8 @@ describe('node repository against Postgres', () => {
   let users: UserRepository;
   let dataRooms: DataRoomRepository;
   let accessControl: AccessControlService;
+  let blobs: BlobRepository;
+  let transactions: TransactionRunner;
 
   beforeAll(async () => {
     prisma = await createTestPrisma();
@@ -39,6 +48,8 @@ describe('node repository against Postgres', () => {
     nodeRepository = new NodeRepository(prisma);
     dataRooms = new DataRoomRepository(prisma);
     users = new UserRepository(prisma);
+    blobs = new BlobRepository(prisma);
+    transactions = new TransactionRunner(prisma);
     nodes = new NodeService(nodeRepository, dataRooms);
     accessControl = new AccessControlService(dataRooms);
   });
@@ -73,6 +84,42 @@ describe('node repository against Postgres', () => {
     const room = await dataRooms.create(user.id, 'Test Data Room');
     const scope = await accessControl.resolveForUser(user.id, room.id);
     return { scope, userId: user.id, dataRoomId: room.id };
+  }
+
+  /**
+   * A `FILE` node, created the only way one can be: through the repository inside a
+   * transaction, pointing at a blob.
+   *
+   * The upload protocol is exercised in `upload.integration.test.ts`; here a file is just
+   * the input the listing and the move need, so the storage round trip is skipped and the
+   * blob is inserted directly.
+   */
+  async function createFile(
+    scope: AccessScope,
+    userId: string,
+    name: string,
+    size: number,
+    parentId: string | null = null,
+  ) {
+    const blob = await blobs.createPending(scope.dataRoomId, {
+      mimeType: 'application/pdf',
+      size,
+    });
+    const destination = await nodes.resolveParentLocation(scope, parentId);
+
+    return transactions.run(async (tx) => {
+      await blobs.markReadyIfPending(tx, scope.dataRoomId, blob.id, {
+        size,
+        mimeType: 'application/pdf',
+      });
+      return nodeRepository.createFile(tx, scope, {
+        ...destination,
+        name,
+        blobId: blob.id,
+        size,
+        createdById: userId,
+      });
+    });
   }
 
   it('counts each row once when the subtree already contains a deleted node', async () => {
@@ -169,5 +216,122 @@ describe('node repository against Postgres', () => {
     }
 
     expect(seen).toEqual(['Alpha', 'Beta', 'charlie', 'delta', 'echo']);
+  });
+
+  /**
+   * The same statement over **mixed data**, which it has never run against.
+   *
+   * Folders-before-files rests on two things: `CREATE TYPE "NodeType" AS ENUM ('FOLDER',
+   * 'FILE')` fixing the enum's sort order, and the keyset comparing `::"NodeType"` rather
+   * than text — as text, `'FILE' < 'FOLDER'` and the order inverts. Both are right by
+   * inspection; this is what executes them.
+   *
+   * The page size is two, so a boundary falls **between** the last folder and the first
+   * file, which is exactly where a text comparison would drop or repeat a row.
+   */
+  it('lists folders before files across a page boundary', async () => {
+    const { scope, userId, dataRoomId } = await signInAsOwner();
+
+    await nodes.createFolder(scope, { parentId: null, name: 'Beta' }, userId);
+    await nodes.createFolder(scope, { parentId: null, name: 'alpha' }, userId);
+    await createFile(scope, userId, 'Contract.pdf', 1_024);
+    await createFile(scope, userId, 'annex.pdf', 2_048);
+
+    const seen: { name: string; type: NodeType }[] = [];
+    let after: { type: NodeType; lowerName: string } | null = null;
+    for (let page = 0; page < 10; page += 1) {
+      const rows = await nodeRepository.listChildrenInScope(scope, dataRoomId, after, 2);
+      if (rows.length === 0) break;
+      seen.push(...rows.map((row) => ({ name: row.name, type: row.type })));
+      const last = rows[rows.length - 1];
+      after = last ? { type: last.type, lowerName: last.lowerName } : null;
+    }
+
+    expect(seen).toEqual([
+      { name: 'alpha', type: 'FOLDER' },
+      { name: 'Beta', type: 'FOLDER' },
+      { name: 'annex.pdf', type: 'FILE' },
+      { name: 'Contract.pdf', type: 'FILE' },
+    ]);
+  });
+
+  /**
+   * The cycle guard, exercised against the shared move path rather than through a screen.
+   *
+   * `BRIEF.md` only requires moving a *file* and no phase builds a folder-move UI, so this
+   * test is the only thing that runs the guard — and the guard is type-agnostic because the
+   * method is shared.
+   *
+   * **`422`, not `409`.** A conflict is a name the user can change; a cycle is a request
+   * that cannot be satisfied at all, and the dialog says so differently. The check is
+   * `newParent.path.startsWith(node.path)` — no query — which also catches moving a node
+   * into itself, because a node's own path starts with itself.
+   */
+  it('refuses to move a folder into its own descendant, and into itself', async () => {
+    const { scope, userId } = await signInAsOwner();
+
+    //  A ── B ── C
+    const a = await nodes.createFolder(scope, { parentId: null, name: 'A' }, userId);
+    const b = await nodes.createFolder(scope, { parentId: a.id, name: 'B' }, userId);
+    const c = await nodes.createFolder(scope, { parentId: b.id, name: 'C' }, userId);
+
+    await expect(nodes.move(scope, a.id, { parentId: c.id })).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
+    await expect(nodes.move(scope, a.id, { parentId: a.id })).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
+
+    // Nothing moved, and no aggregate was transferred by the refusal.
+    expect(await fixtures.nodeCounters(a.id)).toMatchObject({ folderCount: 2 });
+  });
+
+  /**
+   * The successful move: the descendant `path` rewrite and **both halves** of the aggregate
+   * transfer, in one transaction.
+   *
+   * The delta is the whole subtree read off the moved row's own counters plus itself, which
+   * is what keeps this one statement per ancestor chain rather than a subtree scan. The two
+   * Data Room updates net to zero — a move relocates a subtree inside one room.
+   */
+  it('moves a subtree, rewrites descendant paths and transfers the aggregates', async () => {
+    const { scope, userId, dataRoomId } = await signInAsOwner();
+
+    const source = await nodes.createFolder(scope, { parentId: null, name: 'Source' }, userId);
+    const target = await nodes.createFolder(scope, { parentId: null, name: 'Target' }, userId);
+    const moving = await nodes.createFolder(scope, { parentId: source.id, name: 'Deals' }, userId);
+    await createFile(scope, userId, 'terms.pdf', 3_000, moving.id);
+
+    expect(await fixtures.nodeCounters(source.id)).toMatchObject({
+      totalSize: 3_000,
+      fileCount: 1,
+      folderCount: 1,
+    });
+
+    const moved = await nodes.move(scope, moving.id, { parentId: target.id });
+    expect(moved.parentId).toBe(target.id);
+
+    expect(await fixtures.nodeCounters(source.id)).toMatchObject({
+      totalSize: 0,
+      fileCount: 0,
+      folderCount: 0,
+    });
+    expect(await fixtures.nodeCounters(target.id)).toMatchObject({
+      totalSize: 3_000,
+      fileCount: 1,
+      folderCount: 1,
+    });
+
+    // The room is unchanged: a move relocates a subtree inside one room.
+    expect(await fixtures.roomCounters(dataRoomId)).toEqual({
+      totalSize: 3_000,
+      fileCount: 1,
+      folderCount: 3,
+    });
+
+    // The descendant's path was rewritten, so it is still reachable by browsing into the
+    // moved folder rather than only by direct id.
+    const { children } = await nodes.browse(scope, moving.id);
+    expect(children.map((child) => child.name)).toEqual(['terms.pdf']);
   });
 });

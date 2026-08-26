@@ -32,6 +32,17 @@ function describeTarget(databaseUrl: string): string {
 export type ExtendedPrismaClient = ReturnType<typeof createClient>;
 
 /**
+ * An interactive transaction. Spelled as the client minus its connection-level methods,
+ * which is what `$transaction` hands its callback — the extension travels with it, so a
+ * Prisma read inside a transaction is still soft-delete filtered, and a raw one still is
+ * not.
+ */
+export type TransactionClient = Omit<
+  ExtendedPrismaClient,
+  '$connect' | '$disconnect' | '$on' | '$transaction' | '$extends'
+>;
+
+/**
  * Owns the database connection. Deliberately **not** exported from `PersistenceModule`:
  * a service cannot inject it, so the only way to reach the database is through a
  * repository. That is the runtime half of decision #9; the ESLint import boundary is the

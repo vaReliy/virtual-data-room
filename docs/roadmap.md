@@ -304,21 +304,29 @@ accident, because it has only one node type and nothing that reads the quota:
 `node-table.tsx` already renders file rows and deliberately leaves the name unlinked;
 Phase 3 turns that `<span>` into a `Link`.
 
-- [ ] `StorageService`: presign PUT/GET, HEAD, delete — one implementation, MinIO and GCS
-- [ ] Add `@nestjs/throttler` — the one new runtime dependency this phase needs, and the
-      only way the presign rate limit below gets enforced. **The age gate does not bite
-      here** (checked at the Phase 2 → 3 boundary): the newest release is `6.5.0`,
-      published 2025-12-02, so `minimum-release-age=10080` will not refuse it and there is
-      nothing to raise early. Peer range covers `@nestjs/common ^11`. The rule still
-      applies to anything else this phase reaches for on the day it needs it
-- [ ] The four limits as constants in `packages/contracts`, beside the schemas:
+- [x] `StorageService`: presign PUT/GET, HEAD, delete — one implementation, MinIO and GCS
+- [x] Add the **three** new runtime dependencies this phase needs. An earlier draft of this
+      line said `@nestjs/throttler` was the only one; that was wrong, and the stop-and-ask
+      below is what caught it:
+      - `@nestjs/throttler` `6.5.0` — the only way the presign rate limit below gets
+        enforced. **The age gate does not bite** (checked at the Phase 2 → 3 boundary): the
+        newest release is `6.5.0`, published 2025-12-02, so `minimum-release-age=10080` will
+        not refuse it and there is nothing to raise early. Peer range covers
+        `@nestjs/common ^11`
+      - `@aws-sdk/client-s3` `3.1113.0` — the S3 SDK `architecture.md:49` and `CLAUDE.md`
+        § Stack already name
+      - `@aws-sdk/s3-request-presigner` `3.1113.0` — **named by no design document**, and the
+        reason the count was wrong. `getSignedUrl` is not exported from `client-s3`; it is a
+        separate package in the same monorepo. Verified against its own README, not assumed
+      The rule still applies to anything else this phase reaches for on the day it needs it
+- [x] The four limits as constants in `packages/contracts`, beside the schemas:
       `application/pdf`, 10 MB per file, 10 files per presign, a 200 MB room quota. They
       exist only as prose in `architecture.md` today. Shared for the same reason
       `nodeNameSchema` is — the dropzone must reject an oversized file *before* presign, and
       a second hand-written copy of the numbers in the web app is how the two drift. The
       quota stays a constant rather than an env var: it never differs by environment here,
       and the README states it as an answer
-- [ ] `blob.repository.ts` under `modules/file/` — the only module that writes to the
+- [x] `blob.repository.ts` under `modules/file/` — the only module that writes to the
       database without a repository today. Takes `scope.dataRoomId` and adds
       `storageKey: { startsWith: dataRoomId + '/' }` — **Prisma, not raw SQL**: `startsWith`
       compiles to `LIKE`, so the boundary is in the `WHERE` clause and `node.repository.ts`
@@ -326,7 +334,7 @@ Phase 3 turns that `<span>` into a `Link`.
       `randomUUID()`-before-insert pattern
       arrives here for its second carrier: `storageKey` contains the blob's own id and is
       `NOT NULL`, exactly as `path` does for a node (decision #28)
-- [ ] `POST /rooms/:roomId/uploads/presign`: validation, advisory quota check over the
+- [x] `POST /rooms/:roomId/uploads/presign`: validation, advisory quota check over the
       **batch's summed size**, `PENDING` blobs, rate limit keyed on the session `userId` —
       not `req.ip`, which behind the Vercel rewrite is the proxy for every caller.
       `Content-Type: application/pdf` signed into the PUT. Two details that fail *silently*
@@ -345,24 +353,24 @@ Phase 3 turns that `<span>` into a `Link`.
         this: the type is checked again by `HEAD` at complete, so the tests still pass.
         Set `expiresIn` explicitly while there — it defaults to 900 s in the SDK, and an
         inherited default is not a chosen one
-- [ ] `POST /rooms/:roomId/uploads/complete`, **one file per call**: `HEAD` **before** the
+- [x] `POST /rooms/:roomId/uploads/complete`, **one file per call**: `HEAD` **before** the
       transaction opens; then `pg_advisory_xact_lock(hashtextextended(dataRoomId, 0))`,
       authoritative quota check, the conditional `PENDING → READY` flip, node insert via
       `NodeRepository.createFile`, aggregate delta — all inside one interactive transaction.
       Zero rows from the flip means complete already ran: return the existing node by
       `blobId` with `200`, rather than creating a second node on one blob and charging the
       aggregates twice
-- [ ] Auto-suffix on name conflict: optimistic insert, catch `23505`, retry the **whole**
+- [x] Auto-suffix on name conflict: optimistic insert, catch `23505`, retry the **whole**
       transaction, bound 3, then `409`. The bound is not infinite and it is visible — a
       folder already holding `contract.pdf`, `contract (1).pdf` and `contract (2).pdf`
       answers `409` on the fourth drop of that name. Correct per #20, worth a `CHANGELOG.md`
       line because no diff shows it
-- [ ] `GET /rooms/:roomId/nodes/:nodeId/content` → `{ url, expiresAt }`, with
+- [x] `GET /rooms/:roomId/nodes/:nodeId/content` → `{ url, expiresAt }`, with
       `response-content-type` + `response-content-disposition: inline` and `filename` set
       from `node.name`, RFC 5987 encoded. It resolves through `resolveLiveNode`, so `404`
       and `410` come for free. **Not guarded by `role`** — a `VIEWER` must be able to open a
       file shared with them
-- [ ] `NodeRepository.createFile` — the `FILE` sibling of `createFolder`, same shape:
+- [x] `NodeRepository.createFile` — the `FILE` sibling of `createFolder`, same shape:
       `randomUUID()` before the insert, `` path = `${parentPath}${id}/` `` with the trailing
       slash, `blobId` and `size` set, aggregate delta of `{ size: +n, files: +1 }`. It takes
       the caller's `tx`, because upload-complete owns the transaction. In the same commit,
@@ -370,7 +378,7 @@ Phase 3 turns that `<span>` into a `Link`.
       authoritative: `packages/contracts/src/node.ts:114` and
       `apps/api/src/modules/node/node.service.ts:96` both say a `FILE` is born in
       `POST /api/uploads/complete`. The sentence stays true — only the path changes
-- [ ] Upload and content **schemas** in `packages/contracts`, beside the limits above:
+- [x] Upload and content **schemas** in `packages/contracts`, beside the limits above:
       presign body and response, complete body, and the content response. S2 cannot begin
       against a shape that is still moving, which is why the whole contract reshape lands
       in S1 — the limits, these schemas, and nothing left for later
@@ -392,7 +400,7 @@ Phase 3 turns that `<span>` into a `Link`.
       reader arrived from the preview route with the type already in hand, and the folder
       screen is the fallback everywhere else
 - [ ] Rename file (`409` + dialog), delete file
-- [ ] **`POST /:nodeId/move` — the endpoint, in S1.** Split out from the dialog below
+- [x] **`POST /:nodeId/move` — the endpoint, in S1.** Split out from the dialog below
       because it is the heaviest transaction in the phase and it belongs to the other
       session: `architecture.md` § Move covers the parent change, the descendant `path`
       rewrite and **both halves** of the aggregate transfer in one transaction, with cycle
@@ -402,7 +410,7 @@ Phase 3 turns that `<span>` into a `Link`.
       decision #19, and the one that satisfies the brief on its own. UI only: the endpoint
       above is already done and tested when this starts
 - [ ] **Drag-and-drop move** between folders, alongside the "Move to…" dialog
-- [ ] **Three integration tests** (decision #26), on the harness Phase 2 built:
+- [x] **Three integration tests** (decision #26), on the harness Phase 2 built:
       - `23505` on upload, asserting the retry re-runs the **whole** transaction
       - move cycle guard rejects a folder into its own descendant. `BRIEF.md` only
         requires moving a *file*, and no phase builds a folder-move UI — the guard lives
@@ -411,12 +419,12 @@ Phase 3 turns that `<span>` into a `Link`.
         `userId` hit the limit independently, and exhausting one leaves the other passing.
         Without this the `getTracker` override is asserted nowhere and an IP fallback
         looks identical in a single-user test
-- [ ] Extend the Phase 2 listing coverage to **mixed data** — a folder holding both
+- [x] Extend the Phase 2 listing coverage to **mixed data** — a folder holding both
       folders and files, paged across a boundary. Nearly free on the existing harness, and
       it is the only thing that actually executes the enum sort order and the keyset's
       `::"NodeType"` cast. Not a third integration test so much as the first real input to
       the second one
-- [ ] Verify `StorageService` once against the real GCS bucket via an env flip (~10 min) —
+- [x] Verify `StorageService` once against the real GCS bucket via an env flip (~10 min) —
       presign PUT/GET, CORS, and the `response-*` overrides, which are exactly the
       parameters whose GCS behaviour can differ from MinIO's. **Part of the S1 gate, not the
       end of the phase**: the preview is built on the `response-*` overrides, so a GCS
@@ -440,7 +448,7 @@ that turns out to be genuinely required is a stop-and-ask, not a judgement call.
 | Search, filtering, or versioning on conflict | Both are named in the brief | Nowhere — extra credit, decision #1 |
 | A `dataRoomId` column on `Blob`, or any other schema change | The blob's tenancy is carried by a string prefix, which feels weaker | Stop and ask. Decision #28 chose the prefix on purpose |
 | Raw SQL outside `node.repository.ts` | `blob.repository.ts` needs a prefix match | Nowhere. Prisma's `startsWith` compiles to `LIKE`; the ESLint rule stands |
-| Any new runtime dependency beyond `@nestjs/throttler` | DnD and the upload queue both feel library-shaped | Stop and ask. Native DnD and a plain store were chosen deliberately |
+| Any new runtime dependency beyond the three listed above | DnD and the upload queue both feel library-shaped | Stop and ask. Native DnD and a plain store were chosen deliberately — and the ask is what corrected the count above |
 
 Two positive gates, so the phase can be called finished rather than argued about:
 

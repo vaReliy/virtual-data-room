@@ -9,6 +9,87 @@ otherwise see.
 
 ## [Unreleased]
 
+### Added — Phase 3 (S1), upload protocol, move and content URLs
+
+- **`StorageService`.** One implementation for MinIO and GCS, reached through GCS's
+  S3-compatible XML API: presign PUT/GET, `HEAD`, delete. `forcePathStyle` because both
+  endpoints address a bucket by path.
+- **Upload protocol (decision #28).** `POST /api/rooms/:roomId/uploads/presign` takes a
+  batch; `POST /api/rooms/:roomId/uploads/complete` takes **one file**. A `FILE` node is
+  born only here — it cannot exist without a `READY` blob.
+- **`BlobRepository`.** Prisma only, bounded by `storageKey: { startsWith: dataRoomId + '/' }`.
+  `blobs.storageKey` is the whole of a blob's tenancy; `Blob` has no `dataRoomId` column.
+- **`POST /api/rooms/:roomId/nodes/:nodeId/move`.** One transaction: parent change,
+  descendant `path` rewrite, and both halves of the aggregate transfer.
+- **`GET /api/rooms/:roomId/nodes/:nodeId/content`.** `{ url, expiresAt }` as JSON, GET
+  signed for 300 s, `response-content-type` and `response-content-disposition: inline` with
+  an RFC 5987 filename. **Not** guarded by `role` — a `VIEWER` must be able to open a file
+  shared with them in Phase 4.
+- **Presign rate limit**, 20/minute keyed on the session `userId`, registered on the
+  controller after `JwtAuthGuard`.
+- **Contract reshape.** The four limits (`application/pdf`, 10 MB, 10 files, 200 MB quota),
+  the presign / complete / content schemas, and `moveNodeBodySchema` — all of it in S1, so
+  S2 does not build against a moving shape.
+- **Five more integration tests**, on the Phase 2 harness: the `23505` retry, the idempotent
+  replay, the `410` replay, the move cycle guard, and the presign limit being per user.
+  Listing coverage extended to mixed folders and files across a page boundary.
+
+### Notes that the diff does not make obvious — Phase 3 (S1)
+
+- **The auto-suffix bound is 3, and it is visible in behaviour.** A folder already holding
+  `contract.pdf`, `contract (1).pdf` and `contract (2).pdf` answers **`409` on the fourth
+  drop** of that name. Correct per decision #20; no diff shows it. The suffix goes before
+  the extension, and at the 255-character limit the **stem** is shortened rather than the
+  suffix — a truncated suffix would collide again, which is the one thing the retry cannot
+  recover from.
+- **The retry re-runs the whole transaction, and the flip is what proves it.** The
+  conditional `PENDING → READY` update sits *inside* the transaction, so a `23505` on the
+  node insert rolls it back and the blob returns to `PENDING`. Move the flip out, or retry
+  only the insert, and the second attempt finds the blob `READY`, takes the idempotent
+  branch, finds no node, and answers **`410` for an upload that just succeeded**. The
+  integration test asserts the blob ends `READY` once with the room charged once — the
+  obvious assertion, "the second file is named `contract (1).pdf`", passes either way.
+- **Three new runtime dependencies, not the one `roadmap.md:308` names.** `getSignedUrl` is
+  not exported from `@aws-sdk/client-s3`; it lives in `@aws-sdk/s3-request-presigner`, which
+  no design document mentions. Installed with the owner's approval on the stop-and-ask.
+  `roadmap.md:308` still says "the one new runtime dependency" and is wrong.
+- **`signableHeaders: new Set(['content-type'])` is load-bearing and fails silently.**
+  Without it the presigned PUT accepts any content type, and nothing catches it: complete
+  re-checks the type with a `HEAD`, so every test still passes while the guarantee is gone.
+  It cannot be verified against MinIO alone — check 2 of `notes/issues/phase-3/gcs-check.mjs`
+  is what proves it.
+- **`SessionThrottlerGuard` throws instead of falling back to `req.ip`.** Behind the Vercel
+  rewrite `req.ip` is the proxy's address for every caller, so a fallback would turn a broken
+  guard chain into one shared bucket for the whole deployment — a limit that works, counts,
+  and is wrong. It also reads `req.user.userId`: `SessionContext` has no `id`, so the
+  library's own `req.user?.id` spelling compiles here and yields `undefined`.
+- **Complete short-circuits on a `READY` blob before re-validating the bytes.** Taken
+  literally, `HEAD`-then-transaction would re-run the size and type checks on a replay — and
+  a violation there deletes the object, which for an already-completed blob means deleting
+  the bytes behind a live file.
+- **`TransactionRunner` is new, in `persistence/`.** Upload-complete spans two repositories,
+  so its transaction belongs to neither; services cannot open one because `PrismaService` is
+  not exported. It carries the raised Prisma budget — `maxWait` 5 s, `timeout` 15 s — because
+  the advisory lock is taken *inside* the transaction and lock wait counts against `timeout`.
+- **`substring(path FROM $n::int)` — the cast is not decoration.** Postgres has two
+  `substring` forms, and `substring(text FROM text)` is the *regex* one. An uncast bind
+  parameter resolves to it, so the offset is read as a pattern, nothing matches, and every
+  rewritten `path` comes back `NULL`. Here it surfaced loudly as a `23502` because `path` is
+  `NOT NULL`; in a nullable column it would have been silent.
+- **GCS verified, 7/7 against the real bucket**, run by the owner because the agent may not
+  hold the credentials (`notes/issues/phase-3/gcs-check.mjs`, which drives the compiled
+  `StorageService`). The presigned PUT refuses a mismatched content type with `403`, and both
+  `response-*` overrides survive intact — GCS matches MinIO on every parameter S2's preview
+  is built on. CORS is not covered and cannot be until S2 serves a page from the app origin.
+- **A presigned PUT URL is not single-use on GCS.** The second PUT to the same URL returns
+  `200` and replaces the object. So for the whole PUT TTL — 900 s from presign — the bytes
+  behind a completed file can still be swapped, while `Node.size` and the room aggregates
+  keep the values read by the `HEAD` at complete. `db:recompute` does not repair it either —
+  `Blob.size` is stale by the same amount — so the 200 MB quota is evadable by someone
+  willing to do it deliberately. The URL only ever reaches the owner uploading their own
+  file, so it grants no access anyone lacked. **Left as is on purpose** and recorded in the
+  README's known limitations; the reasoning is in `notes/issues/phase-3/deviations.md`.
+
 ### Added — Phase 2, node backend
 
 - **`AccessScope`.** A branded boundary produced only by `AccessControlService`. The brand

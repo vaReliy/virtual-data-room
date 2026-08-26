@@ -11,10 +11,12 @@ import {
   encodeCursor,
   type BrowseResponse,
   type CreateFolderBody,
+  type MoveNodeBody,
   type NodeSummary,
 } from '@dr/contracts';
 
 import type { AccessScope } from '../../access/access-scope';
+import type { TransactionClient } from '../../persistence/prisma.service';
 import { DataRoomRepository } from '../data-room/data-room.repository';
 import { NameConflictError } from './node.errors';
 import {
@@ -47,8 +49,12 @@ export class NodeService {
    * repository directly would compile and then serve a deleted node with a `200` — the
    * worst failure this system has (decision #6).
    */
-  async resolveLiveNode(scope: AccessScope, id: string): Promise<LiveNodeRecord> {
-    const node = await this.nodes.findInScope(scope, id);
+  async resolveLiveNode(
+    scope: AccessScope,
+    id: string,
+    tx?: TransactionClient,
+  ): Promise<LiveNodeRecord> {
+    const node = await this.nodes.findInScope(scope, id, tx);
     if (!node) throw new NotFoundException('Node not found.');
     if (node.deletedAt !== null) throw new GoneException('This item was deleted by the owner.');
 
@@ -92,8 +98,8 @@ export class NodeService {
   /**
    * Creates a folder under `parentId`, or at the caller's scope root when it is `null`.
    *
-   * There is no `type` parameter: this phase creates folders only, and a `FILE` node is
-   * born in `POST /uploads/complete`, never here, because it cannot exist without a
+   * There is no `type` parameter: this creates folders only, and a `FILE` node is born in
+   * `POST /rooms/:roomId/uploads/complete`, never here, because it cannot exist without a
    * `READY` blob.
    */
   async createFolder(
@@ -103,14 +109,11 @@ export class NodeService {
   ): Promise<NodeSummary> {
     this.assertMayWrite(scope);
 
-    const parentId = body.parentId ?? scope.rootNodeId;
-    const parentPath =
-      parentId === null ? scope.rootPath : await this.resolveParentPath(scope, parentId);
+    const destination = await this.resolveParentLocation(scope, body.parentId);
 
     try {
       const created = await this.nodes.createFolder(scope, {
-        parentId,
-        parentPath,
+        ...destination,
         name: body.name,
         createdById,
       });
@@ -142,6 +145,47 @@ export class NodeService {
   }
 
   /**
+   * Relocates a node — file or folder, from one repository method — under a new parent.
+   *
+   * The order of the checks is the error contract, and each status is a different screen:
+   *
+   * - node or destination missing / outside the scope → `404`, deleted → `410`. Both come
+   *   from `resolveLiveNode` and `resolveParentLocation`, which is why neither is spelled
+   *   out below.
+   * - destination is a `FILE` → `422`, from the same shared resolver.
+   * - **destination is the node itself or one of its descendants → `422`, not `409`.** A
+   *   conflict is a name the user can change; a cycle is a request that cannot be satisfied
+   *   at all, and the dialog says so differently. The guard is
+   *   `newParent.path.startsWith(node.path)` — no query, and it catches moving a node into
+   *   itself for free, because a node's own path starts with itself.
+   * - destination is already the current parent → `200`, a no-op. Checked after the guards
+   *   above, so a request that is *both* nonsense and a no-op is still reported as nonsense.
+   * - a live same-`lower(name)` in the destination → `409`, with **no auto-suffix**: the
+   *   user chose the destination knowing its contents (decision #20). Upload is the
+   *   opposite case, and it is the only one that suffixes.
+   */
+  async move(scope: AccessScope, nodeId: string, body: MoveNodeBody): Promise<NodeSummary> {
+    this.assertMayWrite(scope);
+
+    const node = await this.resolveLiveNode(scope, nodeId);
+    const destination = await this.resolveParentLocation(scope, body.parentId);
+
+    if (destination.parentPath.startsWith(node.path)) {
+      throw new UnprocessableEntityException('A folder cannot be moved into itself.');
+    }
+    if (destination.parentId === node.parentId) {
+      return this.toSummary(scope, node);
+    }
+
+    try {
+      const moved = await this.nodes.move(scope, node, destination);
+      return this.toSummary(scope, moved);
+    } catch (error) {
+      throw asHttpError(error);
+    }
+  }
+
+  /**
    * Soft-deletes a node and its whole subtree. Replies with nothing: the warning dialog
    * was rendered *before* the call from the folder's denormalized aggregates, so there is
    * nothing left to tell the client that a cache invalidation does not.
@@ -164,26 +208,43 @@ export class NodeService {
    *
    * Hiding "New folder" behind `role` in the UI is not access control — `curl` does not
    * read the UI.
+   *
+   * Public because the upload protocol is a mutation too: presign creates `Blob` rows and
+   * complete creates a `Node`, so both assert it. The content URL deliberately does not —
+   * it is a read, and a `VIEWER` must be able to open a file shared with them in Phase 4.
    */
-  private assertMayWrite(scope: AccessScope): void {
+  assertMayWrite(scope: AccessScope): void {
     if (scope.role !== 'OWNER') throw new NotFoundException('Node not found.');
   }
 
   /**
-   * A `parentId` must resolve to a **live `FOLDER`**, or `422`.
+   * Where a new or moved node goes: a `parentId` resolved to a **live `FOLDER`**, or the
+   * caller's scope root when it is `null`.
    *
-   * Nothing in the database prevents a child under a `FILE`: `nodes_type_blob_check` ties
-   * `type` to `blob_id`, and the parent foreign key does not look at the parent's type at
-   * all. Unreachable in this phase, where no `FILE` row exists yet — and owed by every
-   * later caller that accepts a `parentId`, because a child under a file breaks the tree
-   * quietly: breadcrumbs would route through a file, and a file would have "contents".
+   * **`422` when it resolves to a `FILE`.** Nothing in the database prevents a child under
+   * one: `nodes_type_blob_check` ties `type` to `blob_id`, and the parent foreign key does
+   * not look at the parent's type at all. A child under a file breaks the tree quietly —
+   * breadcrumbs would route through a file, and a file would have "contents".
+   *
+   * This is the single implementation of that rule, shared by create, move and
+   * upload-complete. `tx` is passed only by the last of them, which re-resolves its parent
+   * *inside* the locked transaction: a 10 MB PUT takes seconds, and the parent can be
+   * deleted during them. A live row under a deleted ancestor is the failure this system
+   * rates worst — missing from its parent's listing and still readable by direct id.
    */
-  private async resolveParentPath(scope: AccessScope, parentId: string): Promise<string> {
-    const parent = await this.resolveLiveNode(scope, parentId);
+  async resolveParentLocation(
+    scope: AccessScope,
+    parentId: string | null,
+    tx?: TransactionClient,
+  ): Promise<{ parentId: string | null; parentPath: string }> {
+    const resolved = parentId ?? scope.rootNodeId;
+    if (resolved === null) return { parentId: null, parentPath: scope.rootPath };
+
+    const parent = await this.resolveLiveNode(scope, resolved, tx);
     if (parent.type !== 'FOLDER') {
       throw new UnprocessableEntityException('A file cannot contain other nodes.');
     }
-    return parent.path;
+    return { parentId: resolved, parentPath: parent.path };
   }
 
   /**
@@ -238,8 +299,12 @@ export class NodeService {
    *
    * `parentId` is reported as `null` at the caller's scope root, so a client walking
    * upwards stops there instead of asking for a node that, for it, does not exist.
+   *
+   * Public because upload-complete returns a node it created through `NodeRepository`
+   * directly, inside its own transaction. One wire shape, written once — `blobId` in
+   * particular is on `NodeRecord` for the content endpoint and must not leave the API.
    */
-  private toSummary(scope: AccessScope, node: NodeRecord | LiveNodeRecord): NodeSummary {
+  toSummary(scope: AccessScope, node: NodeRecord | LiveNodeRecord): NodeSummary {
     return {
       id: node.id,
       parentId: node.id === scope.rootNodeId ? null : node.parentId,

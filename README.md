@@ -25,6 +25,18 @@ cp .env.example .env            # then fill it in — see Configuration below
 `pnpm install` runs `prisma generate` as a postinstall step, so the Prisma client exists
 before the first typecheck.
 
+To run a one-off script or command with the values from `.env` in its environment — the
+storage checks below, a migration against a different database — load the file into the
+shell rather than passing variables one by one:
+
+```bash
+set -a && source .env && set +a
+```
+
+`set -a` marks every subsequent assignment for export, so `source` exports the whole file;
+`set +a` stops that again, so nothing later in the session is exported by accident. The
+application itself does not need this — `@nestjs/config` reads `.env` directly.
+
 Two supply-chain rules apply to every dependency change, and both live in
 `pnpm-workspace.yaml` rather than `.npmrc` — pnpm 10+ does not read them from `.npmrc`:
 
@@ -170,6 +182,30 @@ is the repository root, because the workspace lockfile has to be in it:
 ```bash
 docker build -f apps/api/Dockerfile -t dataroom-api:local .
 ```
+
+## Known limitations
+
+Deliberate, and named here rather than discovered. This is a take-home MVP; each of these is
+a state the system tolerates and reports honestly, not a defect waiting to be found.
+
+**Unreferenced bytes accumulate, and nothing collects them.** A transfer abandoned before
+the completion call leaves a `PENDING` blob; deleting a file leaves a `READY` one, because
+soft delete never touches storage. One scheduled sweeper would collect both — `PENDING`
+older than an hour, and `READY` whose nodes are all soft-deleted. The visible consequence is
+that the quota, which counts node aggregates, can read lower than what the bucket holds.
+
+**A presigned upload URL is not single-use.** Verified against the real bucket: a second
+`PUT` to the same URL returns `200` and replaces the object. For the lifetime of that URL
+(15 minutes from the moment it is issued) the uploader can therefore change the bytes behind
+a file that has already been recorded, while `size` and the folder aggregates keep the
+values read when the upload completed.
+
+The holder of that URL is the person who requested it — the room's owner, uploading their
+own file. So this grants nobody any access they did not already have; what it allows is
+recording one size and storing another, which makes the 200 MB quota evadable by someone
+willing to do it on purpose. Closing it properly means making the key stop accepting writes
+once the upload is recorded, which is a design change rather than a smaller number. Left as
+is, on purpose.
 
 ## Repository layout
 

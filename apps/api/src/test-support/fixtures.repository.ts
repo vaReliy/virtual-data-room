@@ -58,6 +58,26 @@ export class FixturesRepository {
     };
   }
 
+  /**
+   * A blob's status and size as the database holds them.
+   *
+   * The `23505` test turns on this: a retry that re-ran only the insert would leave the
+   * blob `READY` from the abandoned attempt, and nothing else in the assertion would show
+   * it. `Blob` is not soft-deletable, so this read needs no bypass.
+   */
+  async blob(blobId: string): Promise<{ status: string; size: number } | null> {
+    const blob = await this.prisma.client.blob.findFirst({
+      where: { id: blobId },
+      select: { status: true, size: true },
+    });
+    return blob ? { status: blob.status, size: Number(blob.size) } : null;
+  }
+
+  /** How many nodes point at one blob. Two would mean complete ran twice and committed. */
+  async nodeCountForBlob(blobId: string): Promise<number> {
+    return this.prisma.client.node.count({ where: { blobId } });
+  }
+
   /** The live name of a node, to prove a refused rename changed nothing. */
   async nodeName(nodeId: string): Promise<string> {
     const node = await this.prisma.client.node.findFirstOrThrow({

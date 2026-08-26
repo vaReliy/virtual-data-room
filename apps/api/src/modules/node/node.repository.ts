@@ -5,7 +5,7 @@ import type { Breadcrumb, NodeType } from '@dr/contracts';
 
 import type { AccessScope } from '../../access/access-scope';
 import { Prisma } from '../../generated/prisma/client';
-import { PrismaService, type ExtendedPrismaClient } from '../../persistence/prisma.service';
+import { PrismaService, type TransactionClient } from '../../persistence/prisma.service';
 import { NameConflictError } from './node.errors';
 
 /**
@@ -25,6 +25,7 @@ export interface NodeRecord {
   totalSize: number;
   fileCount: number;
   folderCount: number;
+  blobId: string | null;
   updatedAt: Date;
   deletedAt: Date | null;
 }
@@ -54,15 +55,11 @@ export interface AggregateDelta {
 }
 
 /**
- * An interactive transaction. Spelled as the client minus its connection-level methods,
- * which is what `$transaction` hands its callback — the extension travels with it, so a
- * Prisma read inside a transaction is still soft-delete filtered, and a raw one still is
- * not.
+ * Re-exported so the tree's callers have one import for the tree's types. It is declared
+ * in `prisma.service.ts`, beside the client it is derived from, because `TransactionRunner`
+ * needs it too and the persistence layer cannot import from a feature module.
  */
-export type TransactionClient = Omit<
-  ExtendedPrismaClient,
-  '$connect' | '$disconnect' | '$on' | '$transaction' | '$extends'
->;
+export type { TransactionClient };
 
 /**
  * The number of children one listing page returns. Keyset pagination makes the cost of a
@@ -83,6 +80,7 @@ const NODE_COLUMNS = Prisma.sql`
   total_size   AS "totalSize",
   file_count   AS "fileCount",
   folder_count AS "folderCount",
+  blob_id      AS "blobId",
   updated_at   AS "updatedAt",
   deleted_at   AS "deletedAt"
 `;
@@ -98,6 +96,7 @@ interface RawNodeRow {
   totalSize: bigint;
   fileCount: number;
   folderCount: number;
+  blobId: string | null;
   updatedAt: Date;
   deletedAt: Date | null;
 }
@@ -109,7 +108,7 @@ interface RawNodeRow {
  * statement is not translated at all. Both spellings are therefore matched, and the
  * driver error is followed through `cause`, where the adapter puts it.
  */
-function isUniqueViolation(error: unknown): boolean {
+export function isUniqueViolation(error: unknown): boolean {
   let current: unknown = error;
   for (let depth = 0; current !== null && current !== undefined && depth < 5; depth += 1) {
     if (current instanceof Prisma.PrismaClientKnownRequestError && current.code === 'P2002') {
@@ -150,9 +149,18 @@ export class NodeRepository {
    * — scope before deletion — structural rather than a matter of discipline: the
    * statement cannot return an out-of-scope row, so the `410` branch is unreachable from
    * outside the scope.
+   *
+   * `tx` is optional and matters in exactly one place: upload-complete re-resolves its
+   * `parentId` **after** taking the room's advisory lock, and a read on the pooled client
+   * would run on a different connection — outside the transaction's snapshot, and so
+   * outside the serialization the lock was taken for. Everywhere else it is omitted.
    */
-  async findInScope(scope: AccessScope, id: string): Promise<NodeRecord | null> {
-    const rows = await this.prisma.client.$queryRaw<RawNodeRow[]>`
+  async findInScope(
+    scope: AccessScope,
+    id: string,
+    tx?: TransactionClient,
+  ): Promise<NodeRecord | null> {
+    const rows = await (tx ?? this.prisma.client).$queryRaw<RawNodeRow[]>`
       SELECT ${NODE_COLUMNS}
       FROM nodes
       WHERE id = ${id}::uuid
@@ -267,6 +275,199 @@ export class NodeRepository {
       });
     } catch (error) {
       if (isUniqueViolation(error)) throw new NameConflictError(input.name);
+      throw error;
+    }
+  }
+
+  /**
+   * Serializes every upload into one Data Room, for the duration of the caller's
+   * transaction.
+   *
+   * `pg_advisory_xact_lock` releases on commit or rollback with no unlock call, so a
+   * failed transaction cannot leave the room wedged. The room's UUID is hashed to the
+   * `bigint` the lock space takes; `hashtextextended` is the collision-tolerant choice —
+   * two rooms sharing a key would serialize against each other, which is slow and never
+   * wrong.
+   *
+   * The lock is what makes the quota check *authoritative* rather than advisory: two
+   * concurrent completes that each read 190 MB used and each add 10 MB would both pass a
+   * check outside it.
+   *
+   * **`deleteSubtree` deliberately takes no lock.** A concurrent delete frees space this
+   * check cannot see, so an upload can be refused `422` and then succeed on retry — never
+   * the other way round, so the room cannot go over quota. That asymmetry is accepted;
+   * making delete take the same lock would serialize every mutation in the room.
+   *
+   * It lives here because it is raw SQL and this is the only file permitted any, even
+   * though what it locks is a Data Room rather than a part of the tree.
+   */
+  async lockDataRoom(tx: TransactionClient, scope: AccessScope): Promise<void> {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${scope.dataRoomId}, 0))`;
+  }
+
+  /**
+   * Inserts a `FILE` and moves its ancestors' counters, **inside the caller's
+   * transaction**.
+   *
+   * That is the one difference from `createFolder`, and it is not cosmetic:
+   * upload-complete owns the transaction — the advisory lock, the authoritative quota
+   * check and the conditional `PENDING → READY` flip all sit in it — so a node insert that
+   * opened its own would commit outside the lock and could not be rolled back with the
+   * flip. Transactions are passed explicitly as a `tx` parameter, never held in ambient
+   * state.
+   *
+   * Everything else is `createFolder`'s shape exactly: the id comes from `randomUUID()`
+   * **before** the insert, because `path` contains it and is `NOT NULL`, and the path ends
+   * with a **trailing slash**. The slash is the whole reason `LIKE path || '%'` matches a
+   * subtree and nothing else — without it `/a/b/` prefix-matches a sibling `/a/bc/`, and a
+   * single-file delete takes an unrelated node with it.
+   *
+   * A `23505` here is not translated: upload auto-suffixes rather than refusing, and the
+   * retry has to re-run the whole transaction, so the caller catches it.
+   */
+  async createFile(
+    tx: TransactionClient,
+    scope: AccessScope,
+    input: {
+      parentId: string | null;
+      parentPath: string;
+      name: string;
+      blobId: string;
+      size: number;
+      createdById: string;
+    },
+  ): Promise<NodeRecord> {
+    const id = randomUUID();
+    const path = `${input.parentPath}${id}/`;
+
+    const created = await tx.node.create({
+      data: {
+        id,
+        dataRoomId: scope.dataRoomId,
+        parentId: input.parentId,
+        type: 'FILE',
+        name: input.name,
+        path,
+        size: input.size,
+        blobId: input.blobId,
+        createdById: input.createdById,
+      },
+    });
+
+    await this.applyAggregateDelta(tx, scope, ancestorIdsOf(input.parentPath), {
+      size: input.size,
+      files: 1,
+      folders: 0,
+    });
+
+    return this.toRecord(created);
+  }
+
+  /**
+   * The node pointing at a blob, if one is still alive.
+   *
+   * This is the idempotent branch of upload-complete, and it is an **ordinary** read: it
+   * goes through Prisma, so the soft-delete extension narrows it to live rows. That is the
+   * whole point. A `READY` blob proves complete committed once, and complete commits the
+   * flip and the node insert together — so no live node means the file was deleted
+   * afterwards, which is a `410`. Reaching for a third soft-delete bypass to look at the
+   * deleted row would answer a question nobody asked: the caller does not need to see it.
+   *
+   * Scope-bounded on both halves, `dataRoomId` and `rootPath`, so a blob completed in a
+   * room the caller cannot reach is indistinguishable from one that does not exist.
+   */
+  async findByBlobId(scope: AccessScope, blobId: string): Promise<NodeRecord | null> {
+    const node = await this.prisma.client.node.findFirst({
+      where: {
+        blobId,
+        dataRoomId: scope.dataRoomId,
+        path: { startsWith: scope.rootPath },
+      },
+    });
+    return node ? this.toRecord(node) : null;
+  }
+
+  /**
+   * Relocates a node and its whole subtree: the parent change, the descendant `path`
+   * rewrite, and **both halves** of the aggregate transfer, in one transaction.
+   *
+   * The rewrite is one statement over the `path` range rather than a walk, which is what
+   * the materialized path buys. `substring(path from <len+1>)` keeps each row's tail — its
+   * position relative to the moved node — and prefixes the new location onto it. The moved
+   * row's own tail is empty, so it lands exactly on `newPath`; the `CASE` is what changes
+   * `parent_id`, and only on that row.
+   *
+   * **`AND deleted_at IS NULL` is here because the rule says every raw statement carries
+   * it**, not because a justification was found for this one. The visible consequence is
+   * that a soft-deleted descendant keeps a path pointing at the old location. Nothing
+   * serves it — it is a `410` by id and invisible to every listing — and `pnpm db:recompute`
+   * rebuilds `path` from `parent_id`, which is the repair path the invariant table already
+   * names.
+   *
+   * The transferred delta is read off the moved row's **own counters** plus itself, so this
+   * stays one statement per ancestor chain rather than a subtree scan. Both halves run:
+   * negative off the old chain, positive onto the new. Each also updates the Data Room, and
+   * the two room updates net to zero — correct, because a move relocates a subtree inside
+   * one room and changes no whole-room total.
+   *
+   * A name already taken in the destination surfaces as `23505` from
+   * `nodes_parent_name_unique` and becomes a `409` — no auto-suffix, because the user chose
+   * the destination knowing its contents (decision #20).
+   */
+  async move(
+    scope: AccessScope,
+    node: LiveNodeRecord,
+    destination: { parentId: string | null; parentPath: string },
+  ): Promise<NodeRecord> {
+    const newPath = `${destination.parentPath}${node.id}/`;
+    const tailFrom = node.path.length + 1;
+
+    const delta: AggregateDelta = {
+      size: node.totalSize + node.size,
+      files: node.fileCount + (node.type === 'FILE' ? 1 : 0),
+      folders: node.folderCount + (node.type === 'FOLDER' ? 1 : 0),
+    };
+
+    try {
+      return await this.prisma.client.$transaction(async (tx) => {
+        await tx.$executeRaw`
+          UPDATE nodes
+          -- The ::int cast is load-bearing. substring(text FROM text) is the regex form,
+          -- and an uncast bind parameter resolves to it: the offset is read as a pattern,
+          -- no row matches, and every path becomes NULL.
+          SET path = ${newPath} || substring(path FROM ${tailFrom}::int),
+              parent_id = CASE
+                WHEN id = ${node.id}::uuid THEN ${destination.parentId}::uuid
+                ELSE parent_id
+              END,
+              updated_at = now()
+          WHERE data_room_id = ${scope.dataRoomId}::uuid
+            AND path LIKE ${node.path} || '%'
+            AND path LIKE ${scope.rootPath} || '%'
+            AND deleted_at IS NULL
+        `;
+
+        // Strict ancestors on both sides: the moved node's own counters travel with it.
+        await this.applyAggregateDelta(tx, scope, ancestorIdsOf(node.path).slice(0, -1), {
+          size: -delta.size,
+          files: -delta.files,
+          folders: -delta.folders,
+        });
+        await this.applyAggregateDelta(tx, scope, ancestorIdsOf(newPath).slice(0, -1), delta);
+
+        const moved = await tx.$queryRaw<RawNodeRow[]>`
+          SELECT ${NODE_COLUMNS}
+          FROM nodes
+          WHERE id = ${node.id}::uuid
+            AND data_room_id = ${scope.dataRoomId}::uuid
+            AND deleted_at IS NULL
+        `;
+        const row = moved[0];
+        if (!row) throw new Error('The moved node disappeared inside its own transaction.');
+        return this.toRecord(row);
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new NameConflictError(node.name);
       throw error;
     }
   }
@@ -393,6 +594,7 @@ export class NodeRepository {
       totalSize: Number(row.totalSize),
       fileCount: row.fileCount,
       folderCount: row.folderCount,
+      blobId: row.blobId,
       updatedAt: row.updatedAt,
       deletedAt: row.deletedAt,
     };

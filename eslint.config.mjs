@@ -38,6 +38,10 @@ export default tseslint.config(
       '**/coverage/**',
       '**/node_modules/**',
       'apps/api/src/generated/**',
+      // Gitignored working material — issue briefs, deviation logs, and the one-off
+      // verification script the S1 gate hands to the owner. None of it ships, and none of
+      // it is in a tsconfig, so the type-checked rules cannot parse it.
+      'notes/**',
     ],
   },
 

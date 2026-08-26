@@ -16,9 +16,11 @@ import {
 } from '@nestjs/common';
 import {
   createFolderBodySchema,
+  moveNodeBodySchema,
   renameNodeBodySchema,
   type BrowseResponse,
   type CreateFolderBody,
+  type MoveNodeBody,
   type NodeSummary,
   type RenameNodeBody,
 } from '@dr/contracts';
@@ -92,6 +94,27 @@ export class NodeController {
   ): Promise<NodeSummary> {
     const scope = await this.scopeFor(request, roomId);
     return this.nodes.rename(scope, nodeId, body.name);
+  }
+
+  /**
+   * A dedicated sub-resource rather than a field on `PATCH`: folding `parentId` into the
+   * rename body makes `{ "parentId": null }` — move to the room root — indistinguishable
+   * from a `parentId` the client did not send.
+   *
+   * Type-agnostic, because the repository method is shared. `BRIEF.md` only requires moving
+   * a file and no phase builds a folder-move UI, so the cycle guard is covered by a test
+   * rather than by a screen.
+   */
+  @Post(':nodeId/move')
+  @HttpCode(HttpStatus.OK)
+  async move(
+    @Req() request: AuthenticatedRequest,
+    @Param('roomId', ParseUUIDPipe) roomId: string,
+    @Param('nodeId', ParseUUIDPipe) nodeId: string,
+    @Body(new ZodValidationPipe(moveNodeBodySchema)) body: MoveNodeBody,
+  ): Promise<NodeSummary> {
+    const scope = await this.scopeFor(request, roomId);
+    return this.nodes.move(scope, nodeId, body);
   }
 
   /**
