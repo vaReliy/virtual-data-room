@@ -162,6 +162,47 @@ describe('sharing against Postgres', () => {
     expect(granteeScope.rootNodeId).toBe(legal.id);
   });
 
+  /**
+   * The interaction the broadest-grant rule did not cover on its own: two grants on
+   * **sibling** folders, the older of which the owner deletes.
+   *
+   * `path` is a sequence of fixed-width UUID segments, so two folders at the same depth
+   * compare equal on length and the order falls through to `createdAt` — the older grant.
+   * Before liveness became the first sort key that handed the grantee a dead scope root,
+   * and with it a `410` at the room root and a `404` on the folder that was still live,
+   * while "Shared with me" went on listing it.
+   */
+  it('does not let a deleted grant shadow a live one on a sibling folder', async () => {
+    const { owner, grantee, room, ownerScope, legal, finance } = await setUp();
+    await grant(ownerScope, owner.id, legal.id);
+    await grant(ownerScope, owner.id, finance.id);
+
+    await nodes.deleteSubtree(ownerScope, legal.id);
+
+    const granteeScope = await accessControl.resolveForUser(grantee.id, room.id);
+
+    expect(granteeScope.rootNodeId).toBe(finance.id);
+    // And the survivor is genuinely reachable, not merely selected.
+    await expect(nodes.browse(granteeScope)).resolves.toMatchObject({ role: 'VIEWER' });
+  });
+
+  /**
+   * The other half of the same rule: sorting dead grants last must not become filtering
+   * them out. With nothing live left, the grantee is still owed the `410` that says the
+   * owner deleted it — not the `404` that reads as "you were never given this".
+   */
+  it('still answers 410 when every grant the grantee holds points at a deleted node', async () => {
+    const { owner, grantee, room, ownerScope, legal, finance } = await setUp();
+    await grant(ownerScope, owner.id, legal.id);
+    await grant(ownerScope, owner.id, finance.id);
+
+    await nodes.deleteSubtree(ownerScope, legal.id);
+    await nodes.deleteSubtree(ownerScope, finance.id);
+
+    const granteeScope = await accessControl.resolveForUser(grantee.id, room.id);
+    await expect(nodes.browse(granteeScope)).rejects.toBeInstanceOf(GoneException);
+  });
+
   it('stops resolving once the share is revoked', async () => {
     const { owner, grantee, room, ownerScope, legal } = await setUp();
     const share = await grant(ownerScope, owner.id, legal.id);

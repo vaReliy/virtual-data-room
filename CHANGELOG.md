@@ -9,6 +9,41 @@ otherwise see.
 
 ## [Unreleased]
 
+### Fixed — A deleted grant no longer shadows a live one (Phase 4 review)
+
+- **A grantee holding grants on two sibling folders lost the survivor when the owner
+  deleted the other one.** `resolveForUser` picks one scope per room before it knows what
+  the caller is about to read, and the loser was reachable nowhere: the room root answered
+  `410` from the dead scope root, the live folder answered `404` because it lay outside it,
+  and "Shared with me" went on listing that folder — so the application rendered a link to
+  its own `404`. Liveness is now the first key in `compareBreadth`.
+
+#### Notes that the diff does not make obvious
+
+- **`path` length orders ancestors against descendants and nothing else.** A `path` is a
+  sequence of fixed-width UUID segments, so two folders at the same depth compare *equal*
+  however differently they are named, and the order fell through to `created_at` — making
+  the older grant win. The length comparison reads like a breadth measure and is one only
+  along a single branch. Decision #29 now says so; before this it did not, and the rule was
+  written as though length separated any two grants.
+- **Liveness is a sort key, not a filter, and the difference is a status code.** Filtering
+  dead grants out is the shorter fix and it is wrong: a grantee whose *only* grant was
+  deleted would get `404` ("you were never given this") instead of `410` ("the owner deleted
+  this"). That `410` is the entire reason `NodeRepository.findGrantNodeInRoom` bypasses the
+  soft-delete extension. Sorting dead grants last keeps both answers. There is a regression
+  test pinning the all-deleted case for exactly this reason — it passes with or without the
+  fix, and is there to fail on the tempting simplification.
+- **`SharedWithMeEntry` gained `id`** (the share's own id) purely as a stable list key.
+  There is no unique constraint on `(data_room_id, node_id, grantee_email)`, so an owner can
+  grant the same node to the same address twice and `dataRoomId` + `nodeId` does not
+  identify a row — the web list was keying on that pair and produced duplicate React keys.
+  If a uniqueness constraint is ever added, this field stays useful and the constraint is
+  the behaviour change, not this.
+- **Changing `packages/contracts` requires `pnpm --filter @dr/contracts build` before
+  `pnpm typecheck`.** `apps/api` and `apps/web` resolve the package through its `dist`,
+  while Vitest resolves the sources — so a new field is visible to the tests and invisible
+  to `tsc` until the package is rebuilt. Green tests prove nothing about types here.
+
 ### Added — The demo Data Room and the first-login grant (Phase 4, issue 10, re-groomed)
 
 - **`pnpm db:seed`** (from `apps/api`) creates Acme Corp.'s Data Room: eleven folders four

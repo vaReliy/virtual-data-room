@@ -485,12 +485,12 @@ carries no token and is never reached through `/s/:token` (decision #27).
 - [x] Public surface: file → preview; folder or room → browser rooted there. The same
       `NodeView` given a share `source`, not a second browser: `role` arrives as `VIEWER`
       and the existing gating hides every write affordance
-- [ ] "Shared with me" listing
-- [ ] Revoke. A revoked **`LINK`** gives `410 Gone` and its own client state; a revoked
+- [x] "Shared with me" listing
+- [x] Revoke. A revoked **`LINK`** gives `410 Gone` and its own client state; a revoked
       **`USER`** grant gives `404`, because the grantee must land back in "no grant"
       rather than keep a standing confirmation that the document exists
       (`architecture.md` § Error contract)
-- [ ] Share dialog: mode toggle, link copy, grantee list, revoke
+- [x] Share dialog: mode toggle, link copy, grantee list, revoke
 - [x] Seed: Demo Owner user + populated room; on first login auto-create a `USER` share to
       the new user's verified email. **Re-groomed while being built** (`decisions.md` #32):
       the seed *resets* the demo account rather than topping it up, the room and its shared

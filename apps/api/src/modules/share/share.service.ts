@@ -233,6 +233,7 @@ function toSummary(share: ShareRecord): ShareSummary {
 
 function toSharedWithMeEntry(grant: GrantedShareRecord): SharedWithMeEntry {
   return {
+    id: grant.id,
     dataRoomId: grant.dataRoomId,
     nodeId: grant.nodeId,
     // The room's name travels only with a whole-room grant, where it is the name of the

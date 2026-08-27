@@ -61,8 +61,10 @@ export function SharedWithMeSection({ entries }: { entries: SharedWithMeEntry[] 
             </div>
           ) : (
             <ul className="divide-y">
+              {/* Keyed on the share's own id: the same node can legitimately be granted to
+                  the same address twice, so room + node does not identify a row. */}
               {entries.map((entry) => (
-                <SharedWithMeRow key={`${entry.dataRoomId}:${entry.nodeId ?? 'room'}`} entry={entry} />
+                <SharedWithMeRow key={entry.id} entry={entry} />
               ))}
             </ul>
           )}

@@ -140,8 +140,14 @@ export type SharedTargetType = z.infer<typeof sharedTargetTypeSchema>;
  *
  * `sharedBy` is who created the share, which is what tells two similarly named folders
  * from two different counterparties apart.
+ *
+ * `id` is the share's own id, and it is here to be a **stable list key** rather than to be
+ * displayed or sent back. Nothing stops an owner granting the same node to the same address
+ * twice — there is no unique constraint on `(data_room_id, node_id, grantee_email)` — so
+ * `dataRoomId` and `nodeId` together do not identify a row.
  */
 export const sharedWithMeEntrySchema = z.object({
+  id: uuidSchema,
   dataRoomId: uuidSchema,
   nodeId: uuidSchema.nullable(),
   name: z.string(),

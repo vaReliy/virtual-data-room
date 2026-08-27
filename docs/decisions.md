@@ -950,9 +950,17 @@ whole folder away, and neither party would see why.
 
 **Consequences.**
 
-- A grant whose node has been soft-deleted still produces a scope. Filtering it out here
-  would collapse `410` ("the owner deleted this") into `404` ("you were never given this");
-  the `410` is raised on the node, where every other one is.
+- A grant whose node has been soft-deleted still produces a scope — **when no live grant is
+  on offer.** Filtering dead grants out would collapse `410` ("the owner deleted this") into
+  `404` ("you were never given this"); the `410` is raised on the node, where every other
+  one is. So liveness is the *first sort key* rather than a filter: dead grants sort last
+  and still win when they are all there is.
+- **`path` length orders ancestors against descendants and nothing else.** A path is a
+  sequence of fixed-width UUID segments, so two folders at the same depth compare equal and
+  the order falls through to `created_at` — the older grant. That is why liveness had to
+  become a key of its own: without it, a grantee holding grants on two sibling folders lost
+  the survivor outright when the older one was deleted (`410` at the room root, `404` on the
+  folder that was still live), while "Shared with me" went on listing it.
 - Because a grantee's scope root is a real node, `NodeService.browse` resolves it for
   liveness when no `nodeId` is given. An owner has `rootNodeId === null` and never pays the
   extra query.

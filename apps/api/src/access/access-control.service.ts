@@ -80,10 +80,12 @@ export class AccessControlService {
     const broadest = pickBroadest(resolved);
     if (!broadest) throw new NotFoundException('Data Room not found.');
 
-    // **A deleted grant node still produces a scope.** The `410` is raised where every
-    // other one is — on the node itself, in `NodeService` — so that a grantee whose folder
-    // was deleted gets "deleted by the owner" rather than the `404` that reads as "you
-    // were never given this". Short-circuiting here would erase that difference.
+    // **A deleted grant node still produces a scope — but only when no live one is on
+    // offer.** The `410` is raised where every other one is — on the node itself, in
+    // `NodeService` — so that a grantee whose folder was deleted gets "deleted by the
+    // owner" rather than the `404` that reads as "you were never given this".
+    // Short-circuiting here would erase that difference; `compareBreadth` sorts dead grants
+    // last rather than filtering them, which keeps both answers.
     return brandAccessScope({
       dataRoomId,
       rootNodeId: broadest.node.id,
@@ -172,7 +174,31 @@ function pickBroadest(grants: readonly ResolvedGrant[]): ResolvedGrant | null {
   return [...grants].sort(compareBreadth)[0] ?? null;
 }
 
+/**
+ * **Liveness is the first key, and it must not become a filter instead.**
+ *
+ * Dropping deleted grants here would collapse `410` ("the owner deleted this") into `404`
+ * ("you were never given this") for a grantee whose only grant was deleted — the case
+ * `findGrantNodeInRoom` bypasses the soft-delete extension to preserve. Sorting them last
+ * keeps that answer *and* stops a dead grant shadowing a live one.
+ *
+ * Without this key a grantee holding grants on two sibling folders loses the survivor
+ * outright the moment the other is deleted: the room root answers `410` from the dead scope
+ * root, and the live folder answers `404` because it lies outside it — while "Shared with
+ * me" still lists it, since `ShareRepository.listForGrantee` drops the dead grant from the
+ * listing but nothing dropped it from here.
+ *
+ * **`path` length does not separate siblings**, which is why that was never enough on its
+ * own. A path is a sequence of UUID segments of fixed width, so two folders at the same
+ * depth compare equal however differently they are named, and the order falls through to
+ * `createdAt` — making the *older* grant win. Length orders ancestors against descendants,
+ * and nothing else.
+ */
 function compareBreadth(a: ResolvedGrant, b: ResolvedGrant): number {
+  const aLive = a.node.deletedAt === null;
+  const bLive = b.node.deletedAt === null;
+  if (aLive !== bLive) return aLive ? -1 : 1;
+
   if (a.node.path.length !== b.node.path.length) return a.node.path.length - b.node.path.length;
   const byCreatedAt = a.share.createdAt.getTime() - b.share.createdAt.getTime();
   if (byCreatedAt !== 0) return byCreatedAt;
