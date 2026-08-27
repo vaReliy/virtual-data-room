@@ -705,7 +705,15 @@ not after.
   row inside a folder. One mutation invalidates one key, and the header and the table
   refetch together instead of drifting.
 - `node: null` rather than a synthetic root node: a fake row with a fabricated id
-  eventually gets treated as a real one.
+  eventually gets treated as a real one — **except when the scope root is itself a `FILE`**
+  (amended in Phase 4, issue 14). This decision was made when the only things a scope root
+  could be were a folder or the whole room; no `USER` grant before Phase 4 ever targeted a
+  file. Phase 4's `LINK` shares can target a file directly, and a file has no "contents" a
+  browse can list — returning `node: null` there is indistinguishable from an empty folder,
+  which is a silent falsehood about a file that has content. At a `FILE`-rooted scope,
+  `browse()` returns that file's own summary as `node`, so the client's existing dispatch on
+  `node.type` (`node-view.tsx`) renders the preview instead of "nothing here yet." A
+  folder-rooted or whole-room scope keeps `node: null` unchanged.
 
 **`room` is conditional, and that is a security property, not a convenience.** A signed-in
 recipient of a `USER` share browses the *private* route — a `USER` share has no token, so

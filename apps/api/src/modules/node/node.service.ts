@@ -65,27 +65,36 @@ export class NodeService {
   /**
    * Everything the browser renders for one location, in one call (decision #24).
    *
-   * `nodeId` absent means the caller's scope root: `node` is `null` — a synthetic root
-   * row with a fabricated id eventually gets treated as a real one — and `breadcrumbs` is
-   * empty, since there is nowhere further up that the caller is allowed to know about.
+   * `nodeId` absent means the caller's scope root: `breadcrumbs` is empty, since there is
+   * nowhere further up that the caller is allowed to know about. `node` is `null` there too
+   * — a synthetic root row with a fabricated id eventually gets treated as a real one —
+   * **except when the scope root is itself a FILE** (decision #24, amended): a `LINK` share
+   * can target a file directly, and a file has no "contents" to browse into, so the file's
+   * own summary is what a caller at that root needs to render a preview instead of an empty
+   * folder screen.
    *
    * **A subtree-scoped caller's root is a real node, and it can have been deleted.** For
    * an owner there is nothing to check — the room root is not a node — but for a grantee
    * the shared folder itself is one, and every child of a deleted folder is stamped too.
    * Without the check below the listing comes back empty and the screen says "Nothing here
    * yet": a silent falsehood about somebody else's documents, where the truth is a `410`
-   * and the "deleted by the owner" screen. The result is discarded on purpose — `node`
-   * stays `null`, because the scope root still has no row this contract may describe.
+   * and the "deleted by the owner" screen.
    *
    * One extra query, on the grantee path only. An owner has `rootNodeId === null` and
    * never pays it.
    */
   async browse(scope: AccessScope, nodeId?: string, cursor?: string): Promise<BrowseResponse> {
-    if (nodeId === undefined && scope.rootNodeId !== null) {
-      await this.resolveLiveNode(scope, scope.rootNodeId);
-    }
+    const root =
+      nodeId === undefined && scope.rootNodeId !== null
+        ? await this.resolveLiveNode(scope, scope.rootNodeId)
+        : null;
 
-    const node = nodeId === undefined ? null : await this.resolveLiveNode(scope, nodeId);
+    const node =
+      nodeId !== undefined
+        ? await this.resolveLiveNode(scope, nodeId)
+        : root?.type === 'FILE'
+          ? root
+          : null;
 
     // The listing is keyed on COALESCE(parent_id, data_room_id), so root-level children
     // are addressed by the room's id — the same key the uniqueness index uses.

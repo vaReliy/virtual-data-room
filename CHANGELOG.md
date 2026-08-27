@@ -9,6 +9,20 @@ otherwise see.
 
 ## [Unreleased]
 
+### Fixed — A share rooted at a FILE no longer renders as an empty folder (Phase 4, issue 14)
+
+- **A `LINK` share (or a `USER` grant) targeting a single file has answered `node: null,
+  children: []` at its root since issue 07 shipped** — byte-identical to an empty folder or
+  an empty room, so a visitor opening a file share saw "Nothing here yet" for a file that had
+  content. `NodeService.browse` hardcoded `node = null` whenever the caller browsed their own
+  scope root, on the assumption — true through Phase 3, false the moment issue 07 let a
+  `LINK` target a file directly — that a scope root is never itself a `FILE`. `browse()` now
+  returns the file's own summary as `node` when the root is a `FILE`; a folder or whole-room
+  root is unaffected. `docs/decisions.md` decision #24 is amended to state the exception.
+- Found and root-caused during issue 13's manual verification, not by a test — the existing
+  suite had no scope rooted at a `FILE` to exercise this branch. One now does
+  (`share.integration.test.ts`).
+
 ### Fixed — A deleted grant no longer shadows a live one (Phase 4 review)
 
 - **A grantee holding grants on two sibling folders lost the survivor when the owner

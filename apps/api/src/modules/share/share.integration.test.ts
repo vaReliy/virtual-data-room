@@ -6,10 +6,12 @@ import { AccessControlService } from '../../access/access-control.service';
 import type { AccessScope } from '../../access/access-scope';
 import type { Env } from '../../config/env';
 import type { PrismaService } from '../../persistence/prisma.service';
+import { TransactionRunner } from '../../persistence/transaction.runner';
 import { createTestPrisma } from '../../test-support/database';
 import { FixturesRepository } from '../../test-support/fixtures.repository';
 import { UserRepository } from '../auth/user.repository';
 import { DataRoomRepository } from '../data-room/data-room.repository';
+import { BlobRepository } from '../file/blob.repository';
 import { NodeRepository } from '../node/node.repository';
 import { NodeService } from '../node/node.service';
 import { ShareRepository } from './share.repository';
@@ -35,6 +37,8 @@ describe('sharing against Postgres', () => {
   let shareRepository: ShareRepository;
   let shares: ShareService;
   let accessControl: AccessControlService;
+  let blobs: BlobRepository;
+  let transactions: TransactionRunner;
 
   beforeAll(async () => {
     prisma = await createTestPrisma();
@@ -43,6 +47,8 @@ describe('sharing against Postgres', () => {
     dataRooms = new DataRoomRepository(prisma);
     nodeRepository = new NodeRepository(prisma);
     shareRepository = new ShareRepository(prisma);
+    blobs = new BlobRepository(prisma);
+    transactions = new TransactionRunner(prisma);
     nodes = new NodeService(nodeRepository, dataRooms);
     accessControl = new AccessControlService(dataRooms, shareRepository, nodeRepository, users);
     shares = new ShareService(shareRepository, nodes, nodeRepository, users, {
@@ -103,6 +109,34 @@ describe('sharing against Postgres', () => {
     return shares.create(scope, { nodeId, mode: 'USER', granteeEmail }, ownerId);
   }
 
+  /**
+   * A `FILE` node, created the only way one can be: through the repository inside a
+   * transaction, pointing at a blob. Mirrors `node.integration.test.ts`'s helper — the
+   * storage round trip is skipped, since a file here is only the input a share needs to
+   * target something with no children.
+   */
+  async function createFile(scope: AccessScope, userId: string, name: string) {
+    const blob = await blobs.createPending(scope.dataRoomId, {
+      mimeType: 'application/pdf',
+      size: 311,
+    });
+    const destination = await nodes.resolveParentLocation(scope, null);
+
+    return transactions.run(async (tx) => {
+      await blobs.markReadyIfPending(tx, scope.dataRoomId, blob.id, {
+        size: 311,
+        mimeType: 'application/pdf',
+      });
+      return nodeRepository.createFile(tx, scope, {
+        ...destination,
+        name,
+        blobId: blob.id,
+        size: 311,
+        createdById: userId,
+      });
+    });
+  }
+
   it('lets a grantee browse the granted subtree and nothing beside it', async () => {
     const { owner, grantee, room, ownerScope, legal, nda, finance } = await setUp();
     await grant(ownerScope, owner.id, legal.id);
@@ -122,6 +156,27 @@ describe('sharing against Postgres', () => {
       node: { name: 'NDA' },
     });
     await expect(nodes.browse(granteeScope, finance.id)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  /**
+   * Issue 14: a scope rooted at a `FILE` used to answer exactly like an empty folder —
+   * `node: null`, `children: []` — because `browse()` hardcoded `node = null` at the
+   * caller's own root regardless of what kind of node that root was. A file has no children
+   * to list, so the empty `children` array is correct; what was wrong is `node` staying
+   * `null` instead of naming the file, which is what `node-view.tsx` needs to render a
+   * preview instead of "nothing here yet".
+   */
+  it('answers with the file itself, not an empty folder, when the scope root is a FILE', async () => {
+    const { owner, grantee, room, ownerScope } = await setUp();
+    const contract = await createFile(ownerScope, owner.id, 'Contract.pdf');
+    await grant(ownerScope, owner.id, contract.id);
+
+    const granteeScope = await accessControl.resolveForUser(grantee.id, room.id);
+    const atRoot = await nodes.browse(granteeScope);
+
+    expect(atRoot.node).toMatchObject({ id: contract.id, name: 'Contract.pdf', type: 'FILE' });
+    expect(atRoot.children).toEqual([]);
+    expect(atRoot.breadcrumbs).toEqual([]);
   });
 
   it('clips the grantee’s breadcrumbs to the share root', async () => {
