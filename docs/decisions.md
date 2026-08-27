@@ -1123,3 +1123,34 @@ section, which asked for the demo's identity in the environment.
 - **`nest-cli.json` now exists** solely to copy `modules/demo/fixtures/*.pdf` into `dist`, so
   the seed can run from the production image. Deleting the demo makes that file's `assets`
   entry dead.
+
+---
+
+## 33. Download is available to a `VIEWER`
+
+**Status:** Accepted, Phase 4 issue 05 (commit `4049d89`); recorded here in issue 11 to
+close the documentation debt that shipping left behind.
+
+**Context.** `ContentController` is not role-guarded
+(`content.controller.ts:34-38`): every mutation asserts `scope.role === 'OWNER'`, but
+producing a content URL is a read, gated only by the `AccessScope` boundary that already
+answers who may open the node at all.
+
+**Decision.** A `VIEWER` — including a Phase 4 share recipient — can request
+`?disposition=attachment` and download the file, not only preview it. No role check is
+added to the content endpoint.
+
+**Rationale.** A reader who can already open the document in the preview can already keep
+the bytes — screenshot, print-to-PDF, or simply the rendered page — so a block on the
+explicit download button would be theatre: it would inconvenience the legitimate `VIEWER`
+without stopping anyone determined to keep a copy. The `AccessScope` boundary is the actual
+control; `role` governs writes, not reads.
+
+**Consequences.**
+
+- The row-actions menu is no longer hidden behind `canWrite`. It renders whenever it would
+  hold at least one item, with each mutation item individually gated behind the caller's
+  role. Re-gating the whole menu would leave a `VIEWER` with a permitted download and no
+  control to ask for it.
+- Anywhere a future reviewer expects "read" and "write" to share one guard, this is the
+  documented exception: reads are bounded by scope alone.

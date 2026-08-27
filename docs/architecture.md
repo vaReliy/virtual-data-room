@@ -247,12 +247,22 @@ counts node aggregates, can read lower than what the bucket actually holds.
 
 **Downloads and previews** use short-lived presigned GET URLs (`expiresIn: 300`), so a
 leaked URL dies in five minutes and cannot be hot-linked from another site. They are
-fetched from `GET /api/rooms/:roomId/nodes/:nodeId/content`, which returns
-`{ url, expiresAt }` as JSON rather than redirecting: a `302` would remove the stale-cache
-risk decision #15 guards against, but it would contradict #15's stated mechanism and needs
-`Cache-Control: no-store` on the redirect itself to avoid recreating the same bug one level
-down. The endpoint resolves the node through `resolveLiveNode`, so a deleted file is a
-`410` and one outside the scope a `404`, with no code of its own.
+fetched from `GET /api/rooms/:roomId/nodes/:nodeId/content?disposition=inline|attachment`,
+which returns `{ url, expiresAt }` as JSON rather than redirecting: a `302` would remove the
+stale-cache risk decision #15 guards against, but it would contradict #15's stated mechanism
+and needs `Cache-Control: no-store` on the redirect itself to avoid recreating the same bug
+one level down. The endpoint resolves the node through `resolveLiveNode`, so a deleted file
+is a `410` and one outside the scope a `404`, with no code of its own.
+
+`disposition` selects the `Content-Disposition` **type** written into the presigned GET;
+absent means `inline`. It cannot be done on the client: `<a download>` is ignored for a
+cross-origin URL, and the bytes are served by storage rather than by this origin, so the
+disposition has to be inside the signature and chosen at signing time. A future refactor
+that "simplifies" this back to the client will silently stop saving files. `filename*=`
+(RFC 5987) is unconditional either way, so a saved file is named after the node rather than
+its UUID storage key. An unknown `disposition` value is `400`, not a silent fallback to
+`inline`: the query parameter is assembled by our own client, so a bad value is a malformed
+request, and a silent default would hide the typo while the feature half-worked.
 
 ## Name conflicts
 
