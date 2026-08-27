@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { FieldError } from '@/components/ui/field-error';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ApiError, NetworkError } from '@/lib/api-client';
@@ -108,6 +109,7 @@ function NodeNameForm({
         void handleSubmit(event);
       }}
       noValidate
+      className="min-w-0"
     >
       <DialogHeader>
         <DialogTitle>{submitLabel}</DialogTitle>
@@ -137,11 +139,7 @@ function NodeNameForm({
           aria-describedby={fieldError ? 'node-name-error' : undefined}
           disabled={pending}
         />
-        {fieldError ? (
-          <p id="node-name-error" className="text-sm text-destructive">
-            {fieldError}
-          </p>
-        ) : null}
+        <FieldError id="node-name-error">{fieldError}</FieldError>
       </div>
 
       {described?.banner ? (

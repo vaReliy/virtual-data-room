@@ -19,6 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { FieldError } from '@/components/ui/field-error';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -445,6 +446,7 @@ function ShareForm({
         void handleSubmit(event);
       }}
       noValidate
+      className="min-w-0"
     >
       <DialogHeader>
         <DialogTitle>
@@ -478,11 +480,7 @@ function ShareForm({
               aria-describedby={emailError ? 'share-email-error' : undefined}
               disabled={pending}
             />
-            {emailError ? (
-              <p id="share-email-error" className="text-sm text-destructive">
-                {emailError}
-              </p>
-            ) : null}
+            <FieldError id="share-email-error">{emailError}</FieldError>
           </div>
         ) : null}
 
