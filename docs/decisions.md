@@ -1054,3 +1054,72 @@ most revokes have nothing nested beneath them and stay a single click.
 - `DELETE /api/rooms/:roomId/shares/:shareId` takes `?cascade=` rather than a second
   endpoint, defaulting to `false`: a caller assembled before this issue landed does not
   cascade by accident.
+
+---
+
+## 32. The demo is one removable module: reset on every seed, and one meaning for "off"
+
+**Context.** A reviewer has one Google account. Signing in gives them their own empty Data
+Room and nothing to look at, so the permissioned share — an explicit `BRIEF.md` requirement
+— could only be demonstrated by creating a second account. The demo removes that: Acme Corp.
+already holds a populated room, and a sign-in is granted one folder of it.
+
+Everything below was groomed in a session **after** `notes/issues/phase-4/issues/10` was
+written, and supersedes that brief where the two disagree — notably its "Configuration"
+section, which asked for the demo's identity in the environment.
+
+**Decision.**
+
+- **`pnpm db:seed` resets rather than accumulates.** Every run first hard-deletes every Data
+  Room the demo owner holds — nodes, shares, blob rows and stored objects — and rebuilds the
+  tree. The demo account is therefore always in one known state, and N runs leave exactly one
+  room.
+- **The room and the shared folder have fixed ids** (`DEMO_ROOM_ID`,
+  `DEMO_SHARE_FOLDER_ID`). Everything else the seed creates gets a fresh `randomUUID()`.
+- **The demo is not configured.** No `DEMO_*` environment variables: identity, names, ids and
+  the off switch are constants in `apps/api/src/modules/demo/demo.constants.ts`.
+- **"Off" means one thing.** `AUTO_GRANT_ENABLED` stops the grant being *issued*;
+  `pnpm demo:revoke` takes back what was already issued. They are two steps of one
+  procedure, in that order, not two alternatives.
+
+**Rationale.**
+
+- **Reset over accumulate**: without it, a changed room name seeded a second room, and the
+  first sat there forever — invisible to the script and still served to anyone holding a
+  grant on it. "Put this account back to what a fresh seed produces" has no such edge.
+- **Fixed ids over lookup by name**: the seed and the grant have to agree on which folder is
+  shared. By name, changing the name silently stopped the grant from finding anything — a
+  failure with no error. By id they cannot disagree, and a `/rooms/:roomId` link survives a
+  re-seed as a side benefit.
+- **Constants over environment**: the demo exists to be identical everywhere. Two
+  environments disagreeing about it was the same silent-miss failure as the name lookup, one
+  layer up. On Cloud Run a changed environment variable is a new revision anyway, so the
+  variable bought no operational speed either.
+- **Two-step off**: a `Share` is a capability that was **issued**, not a rule re-evaluated
+  per request, so a flag cannot revoke. An earlier `DEMO_AUTO_SHARE` variable was removed for
+  giving the word "off" two meanings with different results — the configuration in which
+  somebody confidently does the wrong one.
+
+**Consequences.**
+
+- **Order is load-bearing when switching the demo off.** Set `AUTO_GRANT_ENABLED = false`,
+  deploy, *then* run `pnpm demo:revoke`. Revoking first re-grants anyone who signs in during
+  the gap; `demo:revoke` warns when it sees the flag still on.
+- **While the flag is on, everyone who signs in is granted.** Accepted: the reviewer's
+  address is not known in advance, and that is the only reason the auto-grant exists.
+- **`demo:revoke` revokes `USER` grants on the demo folder only.** A `LINK` share into the
+  demo room is a deliberate artefact somebody made by hand — a public demo link for the
+  README — and killing it as a side effect would be a surprise. Revoking everything is what a
+  re-seed does. A dedicated mechanism for demo `LINK` shares is not designed yet.
+- **The demo owner cannot be signed in as.** Their `provider_account_id` is synthetic and
+  their address is on `.example`, which RFC 2606 reserves. That is deliberate — but it means
+  demo grants have no UI: they cannot be listed or revoked from the app, only by the script.
+- **Removing the demo** is `apps/api/src/modules/demo/`, one import and one call in
+  `AuthModule`/`AuthService`, and then the repository capabilities that exist only for it,
+  which cannot live in that directory because `PrismaService` is injectable only in
+  `PersistenceModule`: `DataRoomRepository.deleteOwned`, the optional `id` on
+  `DataRoomRepository.create` and `NodeRepository.createFolder`, `BlobRepository.listInRoom`
+  and `deleteAllInRoom`, `StorageService.putObject`, and `UserRepository.findByEmail`.
+- **`nest-cli.json` now exists** solely to copy `modules/demo/fixtures/*.pdf` into `dist`, so
+  the seed can run from the production image. Deleting the demo makes that file's `assets`
+  entry dead.

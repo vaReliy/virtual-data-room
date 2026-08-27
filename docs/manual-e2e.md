@@ -819,6 +819,65 @@ work while proving nothing.
 
 ---
 
+## The demo room
+
+Acme Corp. holds a seeded Data Room and grants one folder of it to every account that signs
+in, so that a reviewer with a single Google account arrives with something in "Shared with
+me". See `docs/decisions.md` #32. `pnpm db:seed` (from `apps/api`) creates it and **resets it
+on every run**.
+
+### DEMO-01 — A fresh account arrives with exactly one shared folder **[state]**
+
+Sign in with a Google account that has never used this deployment. Go to **Shared with me**.
+
+- Exactly **one** row.
+- It names the **folder** — "Due Diligence" — not the room. A room name here would leak what
+  breadcrumb clipping exists to protect.
+- It names who shared it: **Acme Corp.**
+
+Sign out and back in. Still exactly one row: the grant is guaranteed on every sign-in, not
+created once, so a repeat must not add a second.
+
+### DEMO-02 — The grant is clipped, and the room above it is invisible **[state]**
+
+From **DEMO-01**, open the shared row.
+
+- The breadcrumb trail starts **at the shared folder**. Nothing above it, and no room name in
+  the header.
+- The listing shows the folder's own children only. **`Internal` must not appear** — it is
+  seeded as a sibling of the shared folder precisely so that its absence is a visible test of
+  the scope boundary, not an assumption.
+- Every write affordance is absent: no "New folder", no upload, no rename, no delete. The
+  grant is `VIEWER`.
+- Walk down four levels (`Corporate / Incorporation / …`) and back up. The trail never
+  extends above the shared folder, and "up" from the top of the grant does not leave it.
+
+### DEMO-03 — The seeded PDFs are real documents **[state]**
+
+Open `Financials / 2025 / Annual Report 2025.pdf` from inside the grant.
+
+- The preview renders a **multi-page** PDF, not a broken or blank viewer.
+- Download saves it under its own name, not under a UUID.
+
+### DEMO-04 — The room's totals match what it holds
+
+Sign in as nobody in particular and look at the seed's own output instead: `pnpm db:seed`
+ends with `Aggregates verified against the tree: all counters agree.` If it ever ends with
+mismatches, **the numbers in the room header and in the delete warning are wrong** — the
+counters are caches maintained per mutation and are never recomputed on read, so nothing else
+will notice.
+
+### DEMO-05 — Revoking the demo takes it back, without a sign-out
+
+Run `pnpm demo:revoke` from `apps/api` while a grantee has the app open.
+
+- Their next navigation into the shared folder answers `404`, and **Shared with me** empties
+  on its next fetch. No sign-out, and no relogin: access is resolved per request.
+- The command warns if `AUTO_GRANT_ENABLED` is still `true` — in that state the grant returns
+  at the grantee's next sign-in, which is why the flag is flipped and deployed first.
+
+---
+
 ## Reporting a failure
 
 Name the case id, the step, what was expected and what happened. **Include the server log

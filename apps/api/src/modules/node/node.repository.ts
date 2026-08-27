@@ -276,14 +276,26 @@ export class NodeRepository {
    * contains the node's own id and is `NOT NULL`, so a database-side default is not known
    * in time to build it.
    *
+   * `input.id` overrides that generation and has exactly one caller: the demo seed, which
+   * pins the shared folder's identity so a re-seed lands on the same node and the
+   * first-login grant can address it without knowing its name. **No request path may pass
+   * it** — a caller-chosen node id is a caller-chosen `path`, and `path` is what every scope
+   * boundary is computed from.
+   *
    * The insert itself goes through Prisma — nothing about it needs raw SQL, and Prisma
    * fills `created_at` / `updated_at`, which have no database defaults.
    */
   async createFolder(
     scope: AccessScope,
-    input: { parentId: string | null; parentPath: string; name: string; createdById: string },
+    input: {
+      parentId: string | null;
+      parentPath: string;
+      name: string;
+      createdById: string;
+      id?: string;
+    },
   ): Promise<NodeRecord> {
-    const id = randomUUID();
+    const id = input.id ?? randomUUID();
     const path = `${input.parentPath}${id}/`;
 
     try {

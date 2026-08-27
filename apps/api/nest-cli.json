@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.nestjs.com/schema.json",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "src",
+  "compilerOptions": {
+    "tsConfigPath": "tsconfig.build.json",
+    "deleteOutDir": true,
+    "assets": ["modules/demo/fixtures/*.pdf"]
+  }
+}

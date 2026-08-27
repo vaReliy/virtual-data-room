@@ -125,6 +125,22 @@ export class StorageService {
   }
 
   /**
+   * Writes bytes straight from this process. **The seed is its only caller, and it must
+   * stay that way**: every upload a user makes goes through `presignPut` so the bytes never
+   * traverse the API, the Vercel rewrite's 4.5 MB body limit or the Cloud Run request
+   * timeout. Routing a request path through here would reintroduce all three.
+   *
+   * The seed has no browser to presign for, and signing a URL only to `PUT` to it from the
+   * same process would add a signature round trip and a second place for the content type
+   * to be got wrong.
+   */
+  async putObject(key: string, body: Uint8Array, contentType: string): Promise<void> {
+    await this.client.send(
+      new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType }),
+    );
+  }
+
+  /**
    * The real size and content type of a stored object, or `null` if nothing is there.
    *
    * A missing object is an ordinary outcome, not an error: it is what a complete call for

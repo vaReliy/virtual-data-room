@@ -6,6 +6,7 @@ import { PassportModule } from '@nestjs/passport';
 import type { Env } from '../../config/env';
 import { PersistenceModule } from '../../persistence/persistence.module';
 import { DataRoomModule } from '../data-room/data-room.module';
+import { DemoModule } from '../demo/demo.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { GoogleStrategy } from './google.strategy';
@@ -18,6 +19,10 @@ import { SESSION_TTL_SECONDS } from './session';
   imports: [
     PersistenceModule,
     DataRoomModule,
+    // The first-login demo grant. Its own module, not `ShareModule`: that one imports this
+    // one for `JwtAuthGuard`, so the edge would close a cycle. Removing the demo is this
+    // line plus the call in `AuthService` — see `docs/decisions.md` #32.
+    DemoModule,
     // No session middleware: the OAuth handshake is stateless, so there is no server-side
     // session store to run or to scale.
     PassportModule.register({ session: false }),

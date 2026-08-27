@@ -491,8 +491,12 @@ carries no token and is never reached through `/s/:token` (decision #27).
       rather than keep a standing confirmation that the document exists
       (`architecture.md` § Error contract)
 - [ ] Share dialog: mode toggle, link copy, grantee list, revoke
-- [ ] Seed: Demo Owner user + populated room; on first login auto-create a `USER` share to
-      the new user's verified email
+- [x] Seed: Demo Owner user + populated room; on first login auto-create a `USER` share to
+      the new user's verified email. **Re-groomed while being built** (`decisions.md` #32):
+      the seed *resets* the demo account rather than topping it up, the room and its shared
+      folder carry fixed ids so the grant addresses them by id rather than by name, the demo
+      is constants rather than environment variables, and turning it off is
+      `AUTO_GRANT_ENABLED = false` + deploy, *then* `pnpm demo:revoke` — in that order
 - [x] **New scope, added after this phase's original grooming (issue 08.4):** row-menu
       icons on every item, and `/` narrowed to an unconditional redirect with "Shared with
       me" moved to its own `/shared` route, reachable from a permanent `AppShell` nav link.

@@ -91,6 +91,23 @@ export class UserRepository {
     });
   }
 
+  /**
+   * A user by their normalized address. One caller: `DemoShareService`, resolving the demo
+   * owner named in the environment to the row that owns the demo room.
+   *
+   * `email` is `@unique` and every writer lower-cases it, so this is a single-row read on
+   * an index — but it is **not** an authorization primitive and must not become one. An
+   * address identifies a person only once it has been verified, which is why every path
+   * that decides access reads `emailVerified` rather than trusting the string
+   * (decision #7).
+   */
+  async findByEmail(email: string): Promise<UserRecord | null> {
+    return this.prisma.client.user.findFirst({
+      where: { email: email.trim().toLowerCase() },
+      select: this.selection,
+    });
+  }
+
   async findById(userId: string): Promise<UserRecord | null> {
     return this.prisma.client.user.findFirst({
       where: { id: userId },

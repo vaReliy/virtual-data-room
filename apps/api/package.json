@@ -14,7 +14,9 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:reset": "prisma migrate reset"
+    "db:reset": "prisma migrate reset",
+    "db:seed": "nest build && node dist/modules/demo/scripts/seed.js",
+    "demo:revoke": "nest build && node dist/modules/demo/scripts/revoke.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1113.0",

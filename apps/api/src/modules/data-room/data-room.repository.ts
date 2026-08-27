@@ -78,9 +78,42 @@ export class DataRoomRepository {
     return this.prisma.client.dataRoom.count({ where: { ownerId } });
   }
 
-  async create(ownerId: string, name: string): Promise<DataRoomSummary> {
+  /**
+   * **The only hard delete of a Data Room in the system, and the seed's reset is its only
+   * caller.** Everything a user does is a soft delete (decision #6): `deleted_at` is
+   * stamped, the bytes stay, and nothing is ever removed. This is the deliberate exception —
+   * re-seeding must leave the demo account in the state a fresh seed produces, not in that
+   * state plus whatever the last run left behind.
+   *
+   * **It is bounded by `ownerId`, and that predicate is the safety rail.** A room id alone
+   * would let a wrong argument erase a real customer's room; with the owner in the `where`,
+   * the worst a mistake can do is erase a room the demo owner holds. Do not "simplify" it
+   * away.
+   *
+   * Nodes and shares follow by `ON DELETE CASCADE` (`nodes_data_room_id_fkey`,
+   * `shares_data_room_id_fkey`), so every grant into this room dies with it — which is the
+   * intended meaning of a reset: yesterday's grantees lose access rather than keeping a
+   * pointer into a room that has been rebuilt underneath them. `Blob` rows do **not**
+   * cascade, because they hang off `nodes.blob_id` rather than off the room; the caller
+   * removes them, and their objects, afterwards.
+   *
+   * `deleteMany` rather than `delete`, so that a room that is already gone is a no-op
+   * instead of an exception. The soft-delete extension narrows reads only, so this really
+   * does delete — and it reaches a soft-deleted room too, which is what a reset wants.
+   */
+  async deleteOwned(ownerId: string, dataRoomId: string): Promise<void> {
+    await this.prisma.client.dataRoom.deleteMany({ where: { id: dataRoomId, ownerId } });
+  }
+
+  /**
+   * `id` is optional and has exactly one caller: the demo seed, which pins the demo room's
+   * identity so that a re-seed lands on the same room and the first-login grant can address
+   * it without knowing its name. Everywhere else it is omitted and the database default
+   * applies — a Data Room's id is not something a request may choose.
+   */
+  async create(ownerId: string, name: string, id?: string): Promise<DataRoomSummary> {
     const room = await this.prisma.client.dataRoom.create({
-      data: { ownerId, name },
+      data: { ownerId, name, ...(id === undefined ? {} : { id }) },
       select: this.selection,
     });
     return this.toSummary(room);

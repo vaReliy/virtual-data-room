@@ -70,6 +70,40 @@ export class BlobRepository {
   }
 
   /**
+   * Every blob belonging to one Data Room, `PENDING` ones included.
+   *
+   * **No node walk, and none is possible or needed**: `Blob` has no `dataRoomId` column, and
+   * the key prefix *is* the tenancy (decision #28). A blob whose upload was presigned and
+   * abandoned is therefore listed too, which is correct for the one caller — the seed's
+   * reset, which is collecting object keys to remove.
+   */
+  async listInRoom(dataRoomId: string): Promise<BlobRecord[]> {
+    const blobs = await this.prisma.client.blob.findMany({
+      where: { storageKey: { startsWith: `${dataRoomId}/` } },
+    });
+    return blobs.map((blob) => toRecord(blob));
+  }
+
+  /**
+   * **A hard delete, and one of only two in the system** — see
+   * `DataRoomRepository.deleteOwned` for the other and for why they exist at all.
+   *
+   * **Order is load-bearing: the room's nodes must be gone first.** `nodes_blob_id_fkey` is
+   * `ON DELETE SET NULL`, so running this while a `FILE` still points at a blob would null
+   * its `blob_id` and trip `nodes_type_blob_check` — a file that exists with no bytes is
+   * exactly the state that constraint is there to make impossible.
+   *
+   * It removes the rows, not the objects. Storage is a separate system with no transaction
+   * to join, so the caller deletes the bytes itself, from the keys `listInRoom` handed it.
+   */
+  async deleteAllInRoom(dataRoomId: string): Promise<number> {
+    const { count } = await this.prisma.client.blob.deleteMany({
+      where: { storageKey: { startsWith: `${dataRoomId}/` } },
+    });
+    return count;
+  }
+
+  /**
    * The idempotency hinge of upload-complete: a **conditional** flip, not a read followed
    * by a write.
    *

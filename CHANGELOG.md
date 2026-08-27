@@ -9,6 +9,57 @@ otherwise see.
 
 ## [Unreleased]
 
+### Added — The demo Data Room and the first-login grant (Phase 4, issue 10, re-groomed)
+
+- **`pnpm db:seed`** (from `apps/api`) creates Acme Corp.'s Data Room: eleven folders four
+  levels deep and eight documents cut from three committed multi-page PDFs.
+- **Every sign-in is granted one folder of it**, so a reviewer with a single Google account
+  arrives with something in "Shared with me" — the permissioned share `BRIEF.md` asks for,
+  demonstrable without a second account.
+- **`pnpm demo:revoke`** takes that grant back from everyone holding it.
+
+The whole feature is `apps/api/src/modules/demo/`, plus one import and one call in
+`AuthModule`/`AuthService`. `docs/decisions.md` #32 carries the reasoning and the removal
+list.
+
+What the diff does not show:
+
+- **The seed RESETS, it does not top up.** Every run hard-deletes every Data Room the demo
+  owner holds — nodes, shares, blob rows, stored objects — and rebuilds. That is the only
+  hard delete of a Data Room in the system; everything a user does is a soft delete. It is
+  bounded by `ownerId` in the `where`, and **that predicate is the safety rail** — with a
+  room id alone, a wrong argument erases a real customer's room.
+- **The counters are the risk, and they fail silently.** `total_size`, `file_count` and
+  `folder_count` are caches maintained per mutation, never computed on read. A seed that
+  inserted rows directly would leave them at zero, every test would still pass, and the wrong
+  numbers would show in the room header and the delete warning. This one goes through
+  `createFolder`/`createFile` and then re-derives the totals from the tree it built, failing
+  the run on a mismatch. **Do not replace that walk with hardcoded numbers** — they go stale
+  the first time `demoTree()` changes, and nothing notices.
+- **Two ids are pinned** (`DEMO_ROOM_ID`, `DEMO_SHARE_FOLDER_ID`), which is why
+  `DataRoomRepository.create` and `NodeRepository.createFolder` now take an optional `id`.
+  **No request path may pass one**: a caller-chosen node id is a caller-chosen `path`, and
+  `path` is what every scope boundary is computed from. The pin exists so the grant can
+  address the folder by id — by name, renaming it silently stopped the grant from finding
+  anything.
+- **Turning the demo off is two steps, in order.** Set `AUTO_GRANT_ENABLED = false` in
+  `demo.constants.ts`, deploy, *then* run `pnpm demo:revoke`. A `Share` is a capability that
+  was issued, not a rule re-evaluated per request, so the flag alone revokes nothing — and
+  revoking first re-grants anyone who signs in during the gap. The command warns when it sees
+  the flag still on. An earlier `DEMO_AUTO_SHARE` environment variable was removed for giving
+  "off" two meanings with different results.
+- **The demo is not configurable and must not become so.** No `DEMO_*` environment variables:
+  two environments disagreeing about the demo room's name was a way for the seed and the
+  grant to stop finding each other with no error.
+- **The demo owner cannot be signed in as** — synthetic `provider_account_id`, address on the
+  RFC 2606 `.example` TLD. Deliberate, and it means demo grants have no UI at all: they can
+  only be listed or revoked by script.
+- **`nest-cli.json` exists solely to copy `modules/demo/fixtures/*.pdf` into `dist`** so the
+  seed runs from the production image. Nothing else needed it before.
+- **`demo:revoke` spares `LINK` shares** on the demo folder — a public demo link is a
+  deliberate artefact, and killing it as a side effect would surprise. A mechanism for demo
+  `LINK` shares is not designed yet.
+
 ### Added — Cascade revoke with confirmation (Phase 4, issue 09)
 
 - **Revoking a `USER` grant on a folder or the whole room now offers to take everything
