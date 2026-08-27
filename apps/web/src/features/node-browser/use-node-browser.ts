@@ -13,12 +13,7 @@ import {
 } from '@tanstack/react-query';
 
 import { apiFetch, apiNoContent, apiSend, isClientError } from '@/lib/api-client';
-import {
-  browsePath,
-  moveNodePath,
-  nodeMutationPath,
-  type NodeSource,
-} from '@/lib/node-source';
+import { browsePath, moveNodePath, nodeMutationPath, type NodeSource } from '@/lib/node-source';
 import { queryKeys } from '@/lib/query-keys';
 
 export type BrowseQuery = UseInfiniteQueryResult<

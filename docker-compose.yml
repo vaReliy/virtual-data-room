@@ -47,11 +47,8 @@ services:
       minio:
         condition: service_healthy
     entrypoint: >
-      sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing local/dataroom-local &&
-      mc anonymous set none local/dataroom-local
-      "
+      sh -c " mc alias set local http://minio:9000 minioadmin minioadmin && mc mb --ignore-existing
+      local/dataroom-local && mc anonymous set none local/dataroom-local "
 
   api:
     # A stock Node image running the workspace in watch mode. The production image is a
@@ -90,7 +87,8 @@ services:
   web:
     image: node:22-bookworm-slim
     working_dir: /workspace
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @dr/web dev --host"
+    command:
+      sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @dr/web dev --host"
     environment:
       VITE_PORT: '5173'
       # Inside compose the API is a sibling container, so the dev server cannot proxy to

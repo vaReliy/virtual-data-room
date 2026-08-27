@@ -12,7 +12,8 @@ function entryHref(entry: SharedWithMeEntry): string {
 }
 
 function EntryIcon({ type }: { type: SharedWithMeEntry['type'] }) {
-  if (type === 'ROOM') return <Building2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" />;
+  if (type === 'ROOM')
+    return <Building2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" />;
   if (type === 'FOLDER') return <Folder className="mt-0.5 size-4 shrink-0 text-muted-foreground" />;
   return <File className="mt-0.5 size-4 shrink-0 text-muted-foreground" />;
 }
@@ -34,7 +35,8 @@ function SharedWithMeRow({ entry }: { entry: SharedWithMeEntry }) {
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{entry.name}</p>
           <p className="truncate text-xs text-muted-foreground">
-            Shared by {entry.sharedBy.name ?? entry.sharedBy.email} · {formatTimestamp(entry.createdAt)}
+            Shared by {entry.sharedBy.name ?? entry.sharedBy.email} ·{' '}
+            {formatTimestamp(entry.createdAt)}
           </p>
         </div>
       </Link>

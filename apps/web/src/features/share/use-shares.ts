@@ -8,16 +8,17 @@ import { queryKeys } from '@/lib/query-keys';
 const shareListSchema = z.array(shareSummarySchema);
 
 function sharesPath(roomId: string, nodeId: string | null): `/api/${string}` {
-  return nodeId
-    ? `/api/rooms/${roomId}/shares?nodeId=${nodeId}`
-    : `/api/rooms/${roomId}/shares`;
+  return nodeId ? `/api/rooms/${roomId}/shares?nodeId=${nodeId}` : `/api/rooms/${roomId}/shares`;
 }
 
 /**
  * The live shares on one node — or, with `nodeId: null`, on the whole Data Room. Owner-only,
  * same as the endpoint it calls.
  */
-export function useShares(roomId: string, nodeId: string | null): UseQueryResult<ShareSummary[], Error> {
+export function useShares(
+  roomId: string,
+  nodeId: string | null,
+): UseQueryResult<ShareSummary[], Error> {
   return useQuery({
     queryKey: queryKeys.shares(roomId, nodeId),
     queryFn: () => apiFetch(sharesPath(roomId, nodeId), shareListSchema),

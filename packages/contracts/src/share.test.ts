@@ -78,6 +78,8 @@ describe('shareSummarySchema', () => {
   });
 
   it('parses a response that does compute it', () => {
-    expect(shareSummarySchema.parse({ ...base, nestedLiveGrantCount: 2 }).nestedLiveGrantCount).toBe(2);
+    expect(
+      shareSummarySchema.parse({ ...base, nestedLiveGrantCount: 2 }).nestedLiveGrantCount,
+    ).toBe(2);
   });
 });

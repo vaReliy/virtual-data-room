@@ -15,7 +15,9 @@ on:
   workflow_dispatch:
     inputs:
       app_url:
-        description: 'Public SPA origin, e.g. https://virtual-data-room.vercel.app. Leave empty to use the APP_URL repository variable.'
+        description:
+          'Public SPA origin, e.g. https://virtual-data-room.vercel.app. Leave empty to use the
+          APP_URL repository variable.'
         required: false
         type: string
 

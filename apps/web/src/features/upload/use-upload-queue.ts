@@ -198,14 +198,19 @@ export function useUploadQueue(source: NodeSource, parentId: string | null): Upl
 
           let presigned;
           try {
-            presigned = await apiSend(uploadPath(source, 'presign'), presignUploadResponseSchema, 'POST', {
-              parentId,
-              files: live.map((item) => ({
-                name: item.name,
-                size: item.size,
-                mimeType: UPLOAD_MIME_TYPE,
-              })),
-            });
+            presigned = await apiSend(
+              uploadPath(source, 'presign'),
+              presignUploadResponseSchema,
+              'POST',
+              {
+                parentId,
+                files: live.map((item) => ({
+                  name: item.name,
+                  size: item.size,
+                  mimeType: UPLOAD_MIME_TYPE,
+                })),
+              },
+            );
           } catch (error) {
             // Presign is set-level: one `422` for the quota, one `429` for the rate limit,
             // one `410` for a deleted parent. Every file in the batch failed, and each row

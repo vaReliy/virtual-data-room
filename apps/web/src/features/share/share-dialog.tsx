@@ -115,8 +115,8 @@ function CascadeRevokeDialog({
         <DialogHeader>
           <DialogTitle>Revoke access for {grantee}?</DialogTitle>
           <DialogDescription>
-            {grantee} also has {pluralize(nested, 'grant')} inside this folder. Revoking this
-            one leaves {nested === 1 ? 'it' : 'them'} working.
+            {grantee} also has {pluralize(nested, 'grant')} inside this folder. Revoking this one
+            leaves {nested === 1 ? 'it' : 'them'} working.
           </DialogDescription>
         </DialogHeader>
 
@@ -217,7 +217,9 @@ function ShareRow({
         variant="ghost"
         size="icon"
         aria-label={
-          share.mode === 'LINK' ? 'Revoke this link' : `Revoke access for ${share.granteeEmail ?? ''}`
+          share.mode === 'LINK'
+            ? 'Revoke this link'
+            : `Revoke access for ${share.granteeEmail ?? ''}`
         }
         disabled={pending}
         onClick={() => {

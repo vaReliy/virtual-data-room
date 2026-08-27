@@ -18,8 +18,8 @@ export function TermsRoute() {
 
       <LegalSection heading="2. Your account">
         <p>
-          Access requires signing in with a Google account. You are responsible for that account
-          and for everything done through it. Access may be withdrawn at any time.
+          Access requires signing in with a Google account. You are responsible for that account and
+          for everything done through it. Access may be withdrawn at any time.
         </p>
       </LegalSection>
 
@@ -37,15 +37,15 @@ export function TermsRoute() {
       <LegalSection heading="4. No warranty">
         <p>
           The application is provided without warranty of any kind, including availability,
-          durability or fitness for a particular purpose. Keep your own copy of anything you
-          upload: stored files may be deleted at any time, and no backup is promised.
+          durability or fitness for a particular purpose. Keep your own copy of anything you upload:
+          stored files may be deleted at any time, and no backup is promised.
         </p>
       </LegalSection>
 
       <LegalSection heading="5. Liability">
         <p>
-          To the extent permitted by law, no liability is accepted for any loss arising from use
-          of the application, including loss of data or of access to it.
+          To the extent permitted by law, no liability is accepted for any loss arising from use of
+          the application, including loss of data or of access to it.
         </p>
       </LegalSection>
 

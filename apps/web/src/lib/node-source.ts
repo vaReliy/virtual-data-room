@@ -41,11 +41,7 @@ function nodeSegment(source: NodeSource, nodeId: string): string {
 }
 
 /** `undefined` is the caller's scope root, which has no node row to address. */
-export function browsePath(
-  source: NodeSource,
-  nodeId?: string,
-  cursor?: string,
-): `/api/${string}` {
+export function browsePath(source: NodeSource, nodeId?: string, cursor?: string): `/api/${string}` {
   const path = base(source) + (nodeId === undefined ? '' : nodeSegment(source, nodeId));
   return (
     cursor === undefined ? path : `${path}?cursor=${encodeURIComponent(cursor)}`

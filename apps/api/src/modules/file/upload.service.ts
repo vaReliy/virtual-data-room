@@ -125,7 +125,10 @@ export class UploadService {
 
     const stored = await this.verifyStoredBytes(blob);
 
-    return { node: await this.insertWithAutoSuffix(scope, body, blob, stored, createdById), created: true };
+    return {
+      node: await this.insertWithAutoSuffix(scope, body, blob, stored, createdById),
+      created: true,
+    };
   }
 
   /**
@@ -277,7 +280,7 @@ export function suffixedName(name: string, index: number): string {
   const room = MAX_NAME_LENGTH - suffix.length - extension.length;
   if (room < 1) return `${stem}${suffix}`.slice(0, MAX_NAME_LENGTH);
 
-  const trimmed = stem.length > room ? (stem.slice(0, room).trimEnd() || stem.slice(0, 1)) : stem;
+  const trimmed = stem.length > room ? stem.slice(0, room).trimEnd() || stem.slice(0, 1) : stem;
   return `${trimmed}${suffix}${extension}`;
 }
 

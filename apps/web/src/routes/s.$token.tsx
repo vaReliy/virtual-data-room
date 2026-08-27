@@ -28,8 +28,6 @@ export function SharedNodeRootRoute() {
   const source = useMemo(() => (token ? shareSource(token) : null), [token]);
 
   return (
-    <PublicShareShell>
-      {source ? <NodeView source={source} /> : <DeadLinkState />}
-    </PublicShareShell>
+    <PublicShareShell>{source ? <NodeView source={source} /> : <DeadLinkState />}</PublicShareShell>
   );
 }

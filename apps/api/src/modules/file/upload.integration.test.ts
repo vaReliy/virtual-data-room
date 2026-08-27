@@ -92,11 +92,7 @@ describe('upload protocol against Postgres', () => {
   }
 
   /** The whole protocol for one file: presign, the browser's PUT, complete. */
-  async function upload(
-    scope: AccessScope,
-    userId: string,
-    file: { name: string; size: number },
-  ) {
+  async function upload(scope: AccessScope, userId: string, file: { name: string; size: number }) {
     const { files } = await uploads.presign(scope, {
       parentId: null,
       files: [{ name: file.name, size: file.size, mimeType: UPLOAD_MIME_TYPE }],
