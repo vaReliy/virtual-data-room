@@ -506,20 +506,28 @@ strings for the same reasons.
 ```
 apps/web/src/
   routes/
+    home.tsx                       `/` — always redirects to the caller's own room, never renders content
     login.tsx
+    privacy.tsx, terms.tsx         Google Auth Platform requires both
+    not-found.tsx
     rooms.$roomId.tsx              browser shell: breadcrumbs, toolbar, upload zone
     rooms.$roomId.n.$nodeId.tsx    folder contents / file preview
-    shared-with-me.tsx
+    shared.tsx                     `/shared` — "Shared with me", reachable from AppShell's nav
     s.$token.tsx                   public share surface (read-only), rooted at the share
     s.$token.n.$nodeId.tsx         a node inside it — same NodeView, share source
   features/
-    node-browser/   table, breadcrumbs, context menu, move dialog, delete warning
-    upload/         dropzone, queue store, per-file progress
-    share/          share dialog, link list, revoke
-    viewer/         PDF preview
-  lib/              api-client, query-keys, formatters, node-source (room vs share)
-  components/ui/    shadcn
+    session/         session gate, app shell (incl. nav), error states
+    node-browser/    table, breadcrumbs, context menu, move dialog, delete warning
+    upload/          dropzone, queue store, per-file progress
+    share/           share dialog, grantee list and revoke, "Shared with me", public share shell
+    viewer/          PDF preview, download
+    legal/           privacy and terms page body
+  lib/               api-client, query-keys, formatters, node-source (room vs share)
+  components/ui/     shadcn
 ```
+
+There is no `routes/shared-with-me.tsx`: "Shared with me" lives on `/shared` (`shared.tsx`),
+not on a route named after the list.
 
 State: TanStack Query owns all server state; the upload queue is the only genuinely
 client-side state. Every list view implements four states — loading, empty, error, and
