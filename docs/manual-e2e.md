@@ -14,6 +14,51 @@ that still passes after a defect shipped was written too loosely.
 Where a case depends on a rule rather than on a layout, the rule is stated in the case, so
 a future reader can tell a regression from an intentional redesign.
 
+## Driving a real browser (`chrome-devtools` MCP)
+
+For an agent walking these cases through the `chrome-devtools` MCP rather than a human at a
+keyboard. The tools are low-level (accessibility tree + DOM actions), not a test framework —
+mistakes here are usually about which tool to reach for, not about the app.
+
+**This needs one human action first, and the agent cannot do it.** The browser shows a
+permission prompt — "Remote debugging — Allow remote debugging for this browser instance" —
+the first time something tries to attach over the DevTools protocol. Only the person at the
+keyboard can click **Allow**; there is no tool call that approves it, and no way to script
+around it. If every call in this section fails to connect, or `list_pages` comes back empty
+when tabs are visibly open, stop and ask the person running you to check for that prompt (it
+can appear behind the window, or on `chrome://inspect/#remote-debugging`) rather than retrying
+or trying another tool.
+
+1. **Find the tab before opening a new one.** Call `list_pages` first. If the app is already
+   open in a tab (it usually is — the person running you left it there), reuse that `pageId`
+   with `navigate_page`. Only call `new_page` when no tab has it open. Every call below takes
+   the `pageId` you got here — there is no implicit "current tab".
+2. **`take_snapshot`, not a guessed selector.** There is no CSS/XPath selector in this tool
+   set. `take_snapshot` returns the accessibility tree with a `uid` beside every element
+   ("`uid=3_7 radio \"A specific person\"`") — `click` and `fill` take that `uid`, nothing
+   else. Read the element's accessible name and role off the snapshot to decide which `uid` is
+   the one the case means, the same way the case's own wording ("open the control that starts
+   an upload") points at an intent, not a tag.
+3. **Re-snapshot after anything that changes the DOM.** A `uid` is only valid for the snapshot
+   it came from. Opening a dialog, closing it, navigating, or a row disappearing after a
+   delete all invalidate every `uid` you were holding — call `take_snapshot` again before the
+   next `click`/`fill` rather than reusing one from before the change. `click` and `fill` can
+   optionally return a fresh snapshot inline (`includeSnapshot`); reach for that instead of a
+   separate call when you're about to act again immediately after.
+4. **`take_screenshot` is for what the snapshot cannot tell you.** Layout, spacing, whether
+   text is clipped or overlapping, whether a skeleton matches the loaded content's height
+   (**NAV-08**) — the accessibility tree has no geometry, so these are screenshot-only checks.
+   For everything else (does this control exist, what does it say, is it disabled) the
+   snapshot is cheaper and exact; do not screenshot to read text a snapshot already gave you.
+5. **Don't start or restart the dev server.** Assume `pnpm dev` (or `docker compose up`) is
+   already running — check with `list_pages`/a quick `navigate_page` reload before assuming
+   otherwise. Starting a second instance on a different port produces a tab that is not the
+   one holding any existing session or seeded state the case's preconditions rely on.
+6. **A two-tab case (X-01, PRV-04, SES-03, …) is two `pageId`s, not one tab reused.** Open the
+   second with `new_page`, keep both `pageId`s around for the rest of that case, and drive
+   each explicitly — "switch back to tab A" in a case means "call the next tool with tab A's
+   `pageId`", not a browser-focus action this tool set has no equivalent for.
+
 ## How to use this
 
 - **Preconditions** must hold before step 1; a case that starts from the wrong state proves
