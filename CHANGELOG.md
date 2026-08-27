@@ -207,10 +207,17 @@ What the diff does not show:
   for the whole deployment — it still responds, still counts, and is wrong. Trusting more
   hops than really sit in front of the service is the opposite failure: `X-Forwarded-For`
   becomes spoofable and the limit stops applying. It is a deployment fact, not a default,
-  which is why it is an environment variable. **It ships at `0` and the deployed value has
-  not been observed yet** — `ClientIpThrottlerGuard` logs the first anonymous request's
-  `req.ip` and raw header once per process for exactly that purpose. Nothing else in the
-  codebase reads `req.ip`, so the blast radius of a wrong value is this limit alone.
+  which is why it is an environment variable. **It ships at `0` locally; the deployed value
+  was observed at `2`** (2026-08-27) — `ClientIpThrottlerGuard` logs the first anonymous
+  request's `req.ip` and raw header once per process for exactly that purpose. A first
+  attempt shipped `1`, read off the two addresses in a captured `X-Forwarded-For`; that
+  undercounts by one, because Express's numeric `trust proxy` also spends one hop on the raw
+  socket address (Cloud Run's own front end, invisible except at `trust proxy=0`) before it
+  starts consuming the header — `1` resolved `req.ip` to Vercel's own egress address, not the
+  caller's, which surfaced as two different networks sharing one rate-limit bucket. See
+  `notes/issues/phase-4/deviations.md` § `TRUST_PROXY_HOPS` for the two logs that show it.
+  Nothing else in the codebase reads `req.ip`, so the blast radius of a wrong value is this
+  limit alone.
 - **One throttler options array now holds every named bucket, and that is forced.**
   `ThrottlerModule` is `@Global()` and `forRoot` provides `THROTTLER_OPTIONS`, so two
   arrays would be two providers racing for one token and the loser would silently take the
