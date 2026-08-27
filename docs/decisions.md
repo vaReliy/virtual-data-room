@@ -626,20 +626,20 @@ enter.
 - Reversing this is cheap: the repository already has `create`, so the affordance is a controller
   method and a dialog if it is ever wanted.
 
-**Amendment (Phase 4, issue 08.4): the "no switcher" clause narrows, nothing else does.** This
-decision was written when a signed-in user could see at most one thing — `GET /api/me`'s `dataRooms`
-never held more than one entry, and nothing else was reachable. Phase 4 sharing broke that premise:
-a grantee's live grants are a second, legitimate destination (`/shared`, "Shared with me"), so a
-signed-in user can now be in two places. This does not reopen the rest of #23 — still exactly one
-owned room, still no create-room route, still no room list, still no room rename — it only means `/`
-can no longer be the only reachable screen: `/` unconditionally redirects to the caller's own room
-(it no longer branches on shares), and `AppShell` carries a permanent nav link to `/shared`, always
-visible regardless of count. The rejected alternative was hiding that nav link when the count is
-zero — cheaper, since it needed no empty state — but it reproduces the exact problem this amendment
-exists to fix: a nav item that silently appears the moment someone shares something with the caller,
-with no other notification surface in this phase (no Activity feed exists yet). It also contradicts
-both reference products consulted (Google Drive, Dropbox), which keep "shared with you" permanently
-in nav with its own empty state, never hidden at zero.
+**Amendment (Phase 4): the "no switcher" clause narrows, nothing else does.** This decision was
+written when a signed-in user could see at most one thing — `GET /api/me`'s `dataRooms` never held
+more than one entry, and nothing else was reachable. Phase 4 sharing broke that premise: a grantee's
+live grants are a second, legitimate destination (`/shared`, "Shared with me"), so a signed-in user
+can now be in two places. This does not reopen the rest of #23 — still exactly one owned room, still
+no create-room route, still no room list, still no room rename — it only means `/` can no longer be
+the only reachable screen: `/` unconditionally redirects to the caller's own room (it no longer
+branches on shares), and `AppShell` carries a permanent nav link to `/shared`, always visible
+regardless of count. The rejected alternative was hiding that nav link when the count is zero —
+cheaper, since it needed no empty state — but it reproduces the exact problem this amendment exists
+to fix: a nav item that silently appears the moment someone shares something with the caller, with
+no other notification surface in this phase (no Activity feed exists yet). It also contradicts both
+reference products consulted (Google Drive, Dropbox), which keep "shared with you" permanently in
+nav with its own empty state, never hidden at zero.
 
 ---
 
@@ -690,14 +690,14 @@ has to be in place before it is rewritten, not after.
   a folder. One mutation invalidates one key, and the header and the table refetch together instead
   of drifting.
 - `node: null` rather than a synthetic root node: a fake row with a fabricated id eventually gets
-  treated as a real one — **except when the scope root is itself a `FILE`** (amended in Phase 4,
-  issue 14). This decision was made when the only things a scope root could be were a folder or the
-  whole room; no `USER` grant before Phase 4 ever targeted a file. Phase 4's `LINK` shares can
-  target a file directly, and a file has no "contents" a browse can list — returning `node: null`
-  there is indistinguishable from an empty folder, which is a silent falsehood about a file that has
-  content. At a `FILE`-rooted scope, `browse()` returns that file's own summary as `node`, so the
-  client's existing dispatch on `node.type` (`node-view.tsx`) renders the preview instead of
-  "nothing here yet." A folder-rooted or whole-room scope keeps `node: null` unchanged.
+  treated as a real one — **except when the scope root is itself a `FILE`** (amended in Phase 4).
+  This decision was made when the only things a scope root could be were a folder or the whole room;
+  no `USER` grant before Phase 4 ever targeted a file. Phase 4's `LINK` shares can target a file
+  directly, and a file has no "contents" a browse can list — returning `node: null` there is
+  indistinguishable from an empty folder, which is a silent falsehood about a file that has content.
+  At a `FILE`-rooted scope, `browse()` returns that file's own summary as `node`, so the client's
+  existing dispatch on `node.type` (`node-view.tsx`) renders the preview instead of "nothing here
+  yet." A folder-rooted or whole-room scope keeps `node: null` unchanged.
 
 **`room` is conditional, and that is a security property, not a convenience.** A signed-in recipient
 of a `USER` share browses the _private_ route — a `USER` share has no token, so `/s/:token` cannot
@@ -908,7 +908,7 @@ the entity.
 
 ## 29. The broadest live grant defines a grantee's scope
 
-**Status:** Accepted, Phase 4 issue 06. Refines #7's grant resolution; contradicts nothing.
+**Status:** Accepted, Phase 4. Refines #7's grant resolution; contradicts nothing.
 
 **Context.** `AccessControlService.resolveForUser(userId, dataRoomId)` is called with a room id and
 **no node id** — every node endpoint resolves the scope before it looks at what was asked for. It
@@ -955,8 +955,8 @@ would see why.
 
 ## 30. What the anonymous share limit protects, and what it does not
 
-**Status:** Accepted, Phase 4 issue 07. Extends #26's presign limit to the one surface that has no
-session; contradicts nothing.
+**Status:** Accepted, Phase 4. Extends #26's presign limit to the one surface that has no session;
+contradicts nothing.
 
 **Context.** `/api/s/:token` is the only endpoint in the system with no session. There is no
 `userId` to key a limit on, and `SessionThrottlerGuard` cannot be reused: it throws deliberately
@@ -1004,8 +1004,8 @@ features:
 
 ## 31. Cascade revoke is a prompt, not a rule
 
-**Status:** Accepted, Phase 4 issue 09. Not a roadmap checkbox — the roadmap only says "Revoke" —
-and descopable on its own without touching anything else.
+**Status:** Accepted, Phase 4. Not a roadmap checkbox — the roadmap only says "Revoke" — and
+descopable on its own without touching anything else.
 
 **Context.** Access is derived from ancestry, so a `USER` grant on a folder already gives its
 grantee everything below it. A second grant to the same person on a file inside that folder is
@@ -1112,8 +1112,8 @@ the demo's identity in the environment.
 
 ## 33. Download is available to a `VIEWER`
 
-**Status:** Accepted, Phase 4 issue 05 (commit `4049d89`); recorded here in issue 11 to close the
-documentation debt that shipping left behind.
+**Status:** Accepted, Phase 4 (commit `4049d89`); recorded here to close the documentation debt that
+shipping left behind.
 
 **Context.** `ContentController` is not role-guarded (`content.controller.ts:34-38`): every mutation
 asserts `scope.role === 'OWNER'`, but producing a content URL is a read, gated only by the

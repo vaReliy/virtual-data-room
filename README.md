@@ -1,10 +1,219 @@
 # Virtual Data Room
 
-A secure repository for storing and sharing documents during due diligence.
+A secure repository for storing and sharing documents during due diligence, built for Acme Corp.'s
+due-diligence workflow: one owner per Data Room, folders and files with breadcrumb navigation, and
+two sharing modes — a public link and a per-user grant — both revocable.
 
-> **Status: Phase 1.** This README covers setup and configuration only. The project overview, design
-> decisions, ERD and scaling notes are written in Phase 6, where this file is validated and
-> completed.
+## Hosted URLs
+
+- **App:** `<fill in — production Vercel URL>`
+- **API health check:** `<fill in>/api/health`
+
+## Design decisions
+
+The full log, with context and rationale for every call, is `docs/decisions.md` (34 entries) — this
+is the highlight reel. Each number below is that file's entry, not an issue or task number.
+
+- **One `nodes` table for folders and files**, a `type` discriminator, not two tables (#3). Listing,
+  rename and move are written once; `UNIQUE (parent_id, name)` catches cross-type name collisions
+  the application would otherwise have to police by hand.
+- **`parent_id` is the source of truth; `path` is a denormalized materialized path** of ancestor
+  UUIDs (#4). "Does a share exist on this node or an ancestor" — evaluated on nearly every request —
+  becomes a string split and an indexed `IN`, not a recursive query.
+- **Subtree size and item count are incremental counters, not computed on read** (#5): one `UPDATE`
+  over the ancestor chain inside the same transaction as the mutation, so a 50-folder listing never
+  triggers 50 subtree scans.
+- **Soft delete, no trash UI** (#6). `deleted_at` keeps every row for the aggregates and for a clean
+  `410 Gone` on a dead link; the brief's own rule against shipping unimplemented features is why
+  there is no restore screen sitting on top of it.
+- **A share is a grant on a node, resolved by ancestry — never materialized onto descendants** (#7).
+  Revoking one row revokes an entire subtree instantly, with no cascade to run.
+- **Google OAuth only, no password path** (#8) — one less credential store to secure correctly for
+  an MVP whose brief already names social auth as sufficient.
+- **`AccessScope` is a branded type, produced only by `AccessControlService`, and every repository
+  method takes one as its first argument** (#9). A query that forgets to bound itself by scope is a
+  type error, not a code-review miss.
+- **Upload is a three-step protocol** — presign, direct browser `PUT` to storage, then a `complete`
+  call that verifies the bytes and creates the node (#28) — so large files never transit the API
+  process at all.
+- **A `USER` share carries no token, and the two resolution paths (session vs. `/s/:token`) never
+  cross** (#27) — a permissioned grant cannot be probed anonymously by guessing a URL shape.
+- **One Data Room per owner, no create-room affordance, no room switcher** (#23) — the brief
+  describes one Data Room per due-diligence deal, and multi-room support was judged to be scope the
+  brief never asked for.
+
+## Data model
+
+```mermaid
+erDiagram
+    User     ||--o{ Account  : "logs in via"
+    User     ||--o{ DataRoom : owns
+    User     ||--o{ Share    : creates
+    DataRoom ||--o{ Node     : contains
+    DataRoom ||--o{ Share    : "scoped to"
+    Node     ||--o{ Node     : "parent of"
+    Node     }o--|| Blob     : "FILE points to"
+    Node     ||--o{ Share    : "granted on"
+
+    User {
+        uuid     id PK
+        string   email UK
+        boolean  emailVerified
+        string   name
+        string   avatarUrl
+    }
+    Account {
+        uuid     id PK
+        uuid     userId FK
+        enum     provider
+        string   providerAccountId
+    }
+    DataRoom {
+        uuid     id PK
+        uuid     ownerId FK
+        string   name
+        bigint   totalSize
+        int      fileCount
+        int      folderCount
+        datetime deletedAt
+    }
+    Node {
+        uuid     id PK
+        uuid     dataRoomId FK
+        uuid     parentId FK
+        enum     type
+        string   name
+        string   path
+        bigint   size
+        bigint   totalSize
+        int      fileCount
+        int      folderCount
+        uuid     blobId FK
+        datetime deletedAt
+    }
+    Blob {
+        uuid     id PK
+        string   storageKey UK
+        string   mimeType
+        bigint   size
+        string   checksum
+        enum     status
+    }
+    Share {
+        uuid     id PK
+        uuid     dataRoomId FK
+        uuid     nodeId FK
+        enum     mode
+        enum     role
+        string   tokenHash UK
+        string   granteeEmail
+        datetime expiresAt
+        datetime revokedAt
+    }
+```
+
+The full Prisma schema, the raw SQL that Prisma cannot express (a partial unique index, a
+`text_pattern_ops` prefix index, two `CHECK` constraints, the listing expression index), and every
+invariant with its repair path live in `docs/data-model.md`.
+
+## How it scales
+
+### Total size and item count of a folder's whole subtree
+
+Maintained incrementally, not computed on read: every mutation updates the ancestor chain (read from
+`path`, no query needed) inside the same transaction, via `applyAggregateDelta`. A read is always a
+column lookup, never a scan — the trade is one small `UPDATE` per write against O(1) reads
+regardless of subtree size. A `recompute` script re-derives every aggregate from `parent_id` and
+blob sizes if the invariant is ever suspected to have drifted.
+
+### What changes when one Data Room holds 100,000 files
+
+- **Listing** reads direct children only, off an index keyed on
+  `(data_room_id, COALESCE(parent_id, data_room_id), type, lower(name))` — cost is independent of
+  total room size, not the subtree. The `COALESCE` is what lets the room's own root listing use the
+  same index as every folder's: root-level nodes have `parent_id IS NULL`.
+- **Pagination is keyset, not offset**: `WHERE (type, lower(name)) > (cursor)`. Offset pagination
+  degrades linearly with page number and skips or duplicates rows under concurrent writes; keyset
+  stays constant-time and stable.
+- **Aggregates are already denormalized** (see above), so no listing ever triggers a subtree scan.
+- **Permission checks stay constant work**: ancestors come from splitting `path`, and the grant
+  lookup is one indexed `IN` over at most `depth` ids.
+- **Subtree delete and move** are single statements over a `text_pattern_ops` range scan on `path`,
+  not recursive traversal.
+- **Search** (extra credit, not built) would start on the existing `(data_room_id, name)` index for
+  prefix matching, and move to `pg_trgm` if infix matching were required.
+
+### How sharing extends to per-user roles (viewer/editor) without remodeling
+
+It does not need a remodel, because `role` already lives on the `Share` row, not on the user: add
+`EDITOR` to the `ShareRole` enum, have `AccessControlService` return `role` on the `AccessScope` it
+produces, and gate write endpoints on it. Because grants resolve by ancestry rather than being
+materialized onto every descendant, a role change on one `Share` row applies to its whole subtree
+immediately, and two grants on the same node coexist by taking the stronger role.
+
+## AI usage
+
+This project was built with Claude Code end to end, but the heaviest use of it was not writing
+application code — it was closing the design before any of that code existed. `docs/decisions.md`
+holds 34 numbered decisions, each with its context, the alternatives considered, and why one was
+picked; nothing in `docs/roadmap.md` was allowed a checkbox unless the decision behind it was
+written down first. That log is what let later sessions — including ones that had never seen the
+earlier design conversation — implement consistently instead of re-deciding the same question twice.
+
+Implementation itself ran as phases, each with a written brief (a local, gitignored `notes/issues/`
+directory — never committed, since it is process scaffolding, not project documentation), a
+task-level checklist in `docs/roadmap.md`, and a session handover file so a long phase could stop at
+a boundary it chose rather than wherever it ran out of context. Deviations from the plan — a library
+that did not behave as its docs claimed, a cloud value that had to be observed rather than guessed —
+were written down as they were found and, where they had to outlive the session, folded into
+`CHANGELOG.md` or `docs/decisions.md` rather than left only in a local file.
+
+Two habits mattered more than any single generated line of code: **verifying instead of assuming**
+(an external system's behavior, a library's actual export, this repository's own code — checked by
+reading the file or running the command, not recalled from training data) and **grilling the
+design** before building against it — an adversarial review pass that stress-tested edge cases and
+cross- checked new decisions against the existing vocabulary and decision log before anything
+shipped against them.
+
+## Explicitly out of scope
+
+Turned down on purpose, not merely unstarted:
+
+`BRIEF.md` names two extra-credit features — cross-room search and file versioning on a name
+conflict — and neither was attempted; decision #1 time-boxed the build to the required set. The
+upload auto-suffix (`contract (1).pdf`, bound at 3 attempts) looks adjacent to versioning but is not
+one: it avoids a name collision by creating a new node, not by keeping old versions of one.
+
+An `EDITOR` role does not exist — only `OWNER` and `VIEWER` do. That is not a gap so much as the
+answer to the "how it scales" question above: `role` already sits on the grant as a column, so
+`EDITOR` is additive later, not a remodel now.
+
+Also turned down: a trash/restore UI (decision #6 — soft delete is for the aggregates and the `410`
+contract, not to make deletion reversible from the browser); a durable, server-side audit log
+(`CONTEXT.md`'s Activity queue is client-only and forgotten on refresh, on purpose); a PDF-specific
+viewer library like `react-pdf` (decision #15 — the browser's own `<iframe>` was judged good
+enough); and more than one room, a room switcher, or a way to create a second room (decision #23 —
+one signed-in user, one owned room, is the whole model). Curated public demo links for this README
+were considered and dropped too (decision #34): the first-login auto-grant described below already
+demonstrates the graded permissioned share, and anyone who wants to see the public-link surface can
+create one in their own room.
+
+The orphan-blob sweeper and the `recompute` script are described below rather than built — see Known
+limitations.
+
+## Backlog
+
+Groomed, not started — a written brief and a real design exist for each, they were simply not picked
+up in the time available:
+
+- **Table sorting and an "Activity" panel** (server-side sort on name/last-updated, plus a
+  client-side log of upload/move/delete/share events) — groomed as a follow-on phase, seven issues,
+  fully specified.
+- **Recoverable share links** — whether a `LINK` share's token should become recoverable after
+  creation, which would reopen decision #6's one-time-display rule. Raised, not yet decided;
+  client-side caching of the plaintext was considered and rejected outright.
+- **Sharing-source visibility** — surfacing "shared by {name}" on every page of a browsed grant, not
+  only on the top-level "Shared with me" listing. Raised, not yet decided.
 
 ## Requirements
 
@@ -241,11 +450,25 @@ docker build -f apps/api/Dockerfile -t dataroom-api:local .
 Deliberate, and named here rather than discovered. This is a take-home MVP; each of these is a state
 the system tolerates and reports honestly, not a defect waiting to be found.
 
-**Unreferenced bytes accumulate, and nothing collects them.** A transfer abandoned before the
-completion call leaves a `PENDING` blob; deleting a file leaves a `READY` one, because soft delete
-never touches storage. One scheduled sweeper would collect both — `PENDING` older than an hour, and
-`READY` whose nodes are all soft-deleted. The visible consequence is that the quota, which counts
-node aggregates, can read lower than what the bucket holds.
+**Unreferenced bytes accumulate, and nothing collects them.** Two categories, one cause each: a
+transfer abandoned before the completion call leaves a `PENDING` blob (older than an hour is safe to
+sweep), and deleting a file leaves a `READY` one, because soft delete never touches storage —
+`nodes_type_blob_check` requires a `FILE` to keep a non-null `blob_id`, so the row cannot be
+detached, and deleting the bytes anyway would make a reversible operation irreversible in fact while
+still looking reversible. A single scheduled job (daily or weekly; Cloud Run Jobs + Cloud Scheduler)
+would collect both categories. Not built. The visible consequence: the quota is computed from node
+aggregates, not from the bucket, so a room can report fewer bytes used than the bucket actually
+holds — nothing breaks, since the authoritative quota check reads the same aggregates, but the two
+numbers are not the same number.
+
+**Every new sign-in is currently granted a share of the demo room, and this is temporary.** Acme
+Corp.'s `Due Diligence` folder is auto-granted (`USER`, `VIEWER`) to every verified sign-in
+(`DemoGrantService`, decision #32) so a reviewer with one Google account has a permissioned share to
+look at without a second account. This is a reviewer-onboarding aid, not a feature of the product —
+it is not per-user access control being bypassed, it stands in for "the reviewer has no second
+account to grant to." Turned off after grading, in this order: set `AUTO_GRANT_ENABLED = false` and
+redeploy, **then** run `pnpm demo:revoke` — reversed, anyone signing in during the gap is granted
+again.
 
 **A presigned upload URL is not single-use.** Verified against the real bucket: a second `PUT` to
 the same URL returns `200` and replaces the object. For the lifetime of that URL (15 minutes from
@@ -269,6 +492,19 @@ scripts/            One-time cloud bootstrap
 docs/               Decisions, data model, architecture, roadmap
 ```
 
-`CONTEXT.md` defines the domain vocabulary used in code, tests and UI. `docs/decisions.md` carries
-the accepted decisions and their rationale; `docs/architecture.md` describes the layers and the
-constraints that are load-bearing rather than stylistic.
+## Project documentation
+
+This README covers setup and operation. Everything else lives here:
+
+- [`CONTEXT.md`](./CONTEXT.md) — the domain vocabulary used in code, tests and UI.
+- [`BRIEF.md`](./BRIEF.md) — the original brief this project was built against.
+- [`docs/decisions.md`](./docs/decisions.md) — every accepted design decision, with its rationale.
+  The place to check before assuming something was an oversight rather than a choice.
+- [`docs/data-model.md`](./docs/data-model.md) — the schema and its ERD.
+- [`docs/architecture.md`](./docs/architecture.md) — layers, access control, the upload flow, the
+  error contract.
+- [`docs/roadmap.md`](./docs/roadmap.md) — the task-level plan, phase by phase, including what
+  shipped, what was turned down on purpose, and what is groomed but backlogged.
+- [`docs/manual-e2e.md`](./docs/manual-e2e.md) — behaviour-level test cases for walking the app by
+  hand.
+- [`CHANGELOG.md`](./CHANGELOG.md) — what changed and why, phase by phase.

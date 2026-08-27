@@ -477,11 +477,11 @@ is never reached through `/s/:token` (decision #27).
       fixed ids so the grant addresses them by id rather than by name, the demo is constants rather
       than environment variables, and turning it off is `AUTO_GRANT_ENABLED = false` + deploy,
       _then_ `pnpm demo:revoke` — in that order
-- [x] **New scope, added after this phase's original grooming (issue 08.4):** row-menu icons on
-      every item, and `/` narrowed to an unconditional redirect with "Shared with me" moved to its
-      own `/shared` route, reachable from a permanent `AppShell` nav link. Narrows decision #23's
-      "no switcher" clause — sharing means a signed-in user can now legitimately be in two places —
-      without reopening the rest of it: still one owned room, still no create-room/list/rename
+- [x] **New scope, added after this phase's original grooming:** row-menu icons on every item, and
+      `/` narrowed to an unconditional redirect with "Shared with me" moved to its own `/shared`
+      route, reachable from a permanent `AppShell` nav link. Narrows decision #23's "no switcher"
+      clause — sharing means a signed-in user can now legitimately be in two places — without
+      reopening the rest of it: still one owned room, still no create-room/list/rename
 - [x] **Unit tests, mocked repository** — `AccessControlService`: scope boundaries, breadcrumb
       clipping, revoked and expired links, ancestor inheritance, and a `USER` grant matching only a
       **verified** session email — not a token branch, which decision #27 removed. Written here,
@@ -558,39 +558,40 @@ Ship steps are split that way.
 
 ## Explicitly out of scope
 
-Decided against, not merely unstarted — the README states these with their reason so they read as
-considered, not missed:
+Turned down on purpose, not merely unstarted. The README repeats this list with its reasons, so it
+reads as considered rather than missed.
 
-- **Cross-room search and filtering by file name**, and **file versioning on name conflict** — both
-  named in `BRIEF.md` as extra credit and neither attempted (decision #1's time-box). The upload
-  auto-suffix (`contract (1).pdf`, bound at 3) is a collision avoidance, not versioning — it creates
-  a new node, not a new version of one.
-- **Trash / restore UI** — decision #6. Soft delete keeps every row for the aggregates and the `410`
-  contract, not to make deletion reversible from the UI.
-- **An `EDITOR` role** — only `OWNER` and `VIEWER` exist. This is itself the answer to `BRIEF.md`'s
-  "how does sharing extend to per-user roles" question, not a gap: `role` is already a column on the
-  grant, so adding `EDITOR` is additive, not a remodel.
-- **A durable, server-side audit log** — `CONTEXT.md`'s Activity queue is client-only and forgotten
-  on refresh, deliberately not this.
-- **The orphan-blob sweeper and `pnpm db:recompute`** — both described in the README, neither
-  implemented (Phase 6).
-- **Curated public demo links in the README** — decision #34. The graded permissioned share is
-  already demonstrated by the first-login auto-grant; a public link is self-testable by any reviewer
-  in their own room.
-- **A PDF-specific viewer library** (`react-pdf` or similar) — decision #15 put it on the stretch
-  list; the browser's native `<iframe>` renderer was judged sufficient.
-- **Multiple rooms, a room switcher, or creating a second room** — decision #23. One signed-in user,
-  one owned room, by design.
+`BRIEF.md` names two extra-credit features — cross-room search and file versioning on a name
+conflict — and neither was attempted; decision #1 time-boxed the build to the required set. The
+upload auto-suffix (`contract (1).pdf`, bound at 3) looks adjacent to versioning but is not one: it
+avoids a name collision by creating a new node, it does not keep old versions of one.
+
+An `EDITOR` role does not exist — only `OWNER` and `VIEWER` do. That is not a gap so much as the
+answer to `BRIEF.md`'s own question about extending sharing to per-user roles: `role` already sits
+on the grant as a column, so `EDITOR` would be additive later, not a remodel now.
+
+Also turned down: a trash/restore UI (decision #6 — soft delete is for the aggregates and the `410`
+contract, not to make deletion reversible from the browser); a durable, server-side audit log
+(`CONTEXT.md`'s Activity queue is client-only, forgotten on refresh, and that is deliberate); a
+PDF-specific viewer library like `react-pdf` (decision #15 — the browser's own `<iframe>` was judged
+good enough); and more than one room, a room switcher, or a way to create a second room (decision
+#23 — one signed-in user, one owned room, is the whole model). Curated public demo links in the
+README were considered and dropped too (decision #34) — the first-login auto-grant already
+demonstrates the graded permissioned share, and a reviewer who wants to see the public-link surface
+can make one in their own room.
+
+The orphan-blob sweeper and `pnpm db:recompute` are described in the README rather than built — see
+Phase 6 below.
 
 ## Backlog — groomed, not started
 
-Distinct from the list above: these have a written brief and a real design already, just not picked
-up yet. Not a gap in thinking, a prioritization call.
+These already have a written brief and a real design, unlike the list above — they were not turned
+down, just not picked up yet. A prioritization call, not a gap in thinking.
 
-- **Phase 4.1 — Table and Activity**: server-side sort on `(name | updated)`, and the client-side
-  "Activity" panel for upload/move/delete/share events. Seven issues, groomed and ready-for-agent,
-  fully specified in its own PRD.
-- **Recoverable link, grooming request** — whether a `LINK` share's token should become recoverable
-  after creation, reopening decision #6. Not yet decided.
-- **Sharing-source visibility, grooming request** — surfacing "shared by {name}" on every page of a
-  browsed grant, not just the `/shared` listing. Not yet decided.
+- [ ] **Table and Activity** (groomed as "Phase 4.1"): server-side sort on `(name | updated)`, and a
+      client-side "Activity" panel for upload/move/delete/share events. Seven issues, fully
+      specified, ready for an agent to pick up
+- [ ] **Recoverable link** — whether a `LINK` share's token should become recoverable after
+      creation, which would reopen decision #6. Grooming request, not yet decided
+- [ ] **Sharing-source visibility** — surfacing "shared by {name}" on every page of a browsed grant,
+      not only on the `/shared` listing. Grooming request, not yet decided

@@ -8,19 +8,19 @@ Entries record what changed **and** what is easy to get wrong about it. Design r
 
 ## [Unreleased]
 
-### Fixed — A share rooted at a FILE no longer renders as an empty folder (Phase 4, issue 14)
+### Fixed — A share rooted at a FILE no longer renders as an empty folder (Phase 4)
 
 - **A `LINK` share (or a `USER` grant) targeting a single file has answered
-  `node: null, children: []` at its root since issue 07 shipped** — byte-identical to an empty
-  folder or an empty room, so a visitor opening a file share saw "Nothing here yet" for a file that
-  had content. `NodeService.browse` hardcoded `node = null` whenever the caller browsed their own
-  scope root, on the assumption — true through Phase 3, false the moment issue 07 let a `LINK`
+  `node: null, children: []` at its root since the public-link surface shipped** — byte-identical to
+  an empty folder or an empty room, so a visitor opening a file share saw "Nothing here yet" for a
+  file that had content. `NodeService.browse` hardcoded `node = null` whenever the caller browsed
+  their own scope root, on the assumption — true through Phase 3, false the moment a `LINK` could
   target a file directly — that a scope root is never itself a `FILE`. `browse()` now returns the
   file's own summary as `node` when the root is a `FILE`; a folder or whole-room root is unaffected.
   `docs/decisions.md` decision #24 is amended to state the exception.
-- Found and root-caused during issue 13's manual verification, not by a test — the existing suite
-  had no scope rooted at a `FILE` to exercise this branch. One now does
-  (`share.integration.test.ts`).
+- Found and root-caused during the `TRUST_PROXY_HOPS` manual verification against the deployed
+  chain, not by a test — the existing suite had no scope rooted at a `FILE` to exercise this branch.
+  One now does (`share.integration.test.ts`).
 
 ### Fixed — A deleted grant no longer shadows a live one (Phase 4 review)
 
@@ -56,7 +56,7 @@ Entries record what changed **and** what is easy to get wrong about it. Design r
   resolves the sources — so a new field is visible to the tests and invisible to `tsc` until the
   package is rebuilt. Green tests prove nothing about types here.
 
-### Added — The demo Data Room and the first-login grant (Phase 4, issue 10, re-groomed)
+### Added — The demo Data Room and the first-login grant (Phase 4, re-groomed)
 
 - **`pnpm db:seed`** (from `apps/api`) creates Acme Corp.'s Data Room: eleven folders four levels
   deep and eight documents cut from three committed multi-page PDFs.
@@ -105,7 +105,7 @@ What the diff does not show:
   artefact, and killing it as a side effect would surprise. A mechanism for demo `LINK` shares is
   not designed yet.
 
-### Added — Cascade revoke with confirmation (Phase 4, issue 09)
+### Added — Cascade revoke with confirmation (Phase 4)
 
 - **Revoking a `USER` grant on a folder or the whole room now offers to take everything nested
   beneath it with it**, when the same grantee holds other live grants there — a confirmation names
@@ -128,7 +128,7 @@ What the diff does not show:
 - **`ShareRepository.revokeMany`** revokes several shares as one `UPDATE ... WHERE id IN (...)` —
   atomic by itself, so no `$transaction` was added for it.
 
-### Added — Row-menu icons, and "Shared with me" becomes its own route (Phase 4, issue 08.4)
+### Added — Row-menu icons, and "Shared with me" becomes its own route (Phase 4)
 
 - **Every row-menu item now has an icon.** Rename got `Pencil`, Move got `FolderInput`, and Delete
   got `Trash2` — the same destructive glyph `ShareList`'s revoke button already used, so the two
@@ -170,9 +170,9 @@ What the diff does not show:
   close, so sharing a different node right after showed the previous share's link.
 - **`useRevokeShare`'s mutation folds a `410` into success in `mutationFn` itself.** Revoke is
   idempotent at the API (a second `DELETE` returns `204`, not `410` — verified against the running
-  service, not assumed from the brief), and the fold means every caller, including issue 09's
-  cascade-revoke confirmation later, sees one outcome shape rather than special-casing "already
-  gone".
+  service, not assumed from the brief), and the fold means every caller, including the
+  cascade-revoke confirmation built later in this phase, sees one outcome shape rather than
+  special-casing "already gone".
 - **"Shared with me" lives at `/`, the app's one resolver route, not a second navigation target.**
   `HomeRoute` now fetches `GET /api/shares/shared-with-me` before deciding: an empty result or a
   failed query redirects to the caller's own room exactly as before this feature, and the screen
@@ -189,7 +189,7 @@ What the diff does not show:
   the whole room; email normalization; a same-day expiry; listing and revoking (including a double
   revoke); and the grantee's "Shared with me" view.
 
-### Added — Sharing: the public link surface (Phase 4, issue 07)
+### Added — Sharing: the public link surface (Phase 4)
 
 - **`TRUST_PROXY_HOPS` is a new environment variable, and removing it silently breaks a security
   control.** `main.ts` feeds it to Express `trust proxy`, and exactly one thing reads the result:
@@ -255,7 +255,7 @@ What the diff does not show:
   asserting the likeliest, which is `BRIEF.md`'s "deleting a folder that is being viewed by someone
   it was shared with" answered honestly without a contract change.
 
-### Added — Sharing: shares written, and grants resolved (Phase 4, issue 06)
+### Added — Sharing: shares written, and grants resolved (Phase 4)
 
 - **A `LINK` share's URL is returned exactly once**, in the response to the call that created it.
   `randomBytes(32).toString('base64url')` is minted in `share-token.ts`, only its SHA-256 reaches
@@ -302,11 +302,11 @@ What the diff does not show:
   (`.trim().toLowerCase()`), because matching a grant is a plain string comparison and one
   un-normalized write makes it miss silently.
 - No migration: `Share` and `shares_mode_check` shipped with the init migration.
-- `/s/:token` has no controller yet — issue 07 owns the anonymous surface — and the web app has no
-  share dialog or "Shared with me" screen yet (issue 08). `GET /api/shares/shared-with-me` already
-  answers.
+- `/s/:token` has no controller yet — the public-link surface lands later in this phase — and the
+  web app has no share dialog or "Shared with me" screen yet. `GET /api/shares/shared-with-me`
+  already answers.
 
-### Fixed — Folder contents no longer change height between states (Phase 4, issue 04)
+### Fixed — Folder contents no longer change height between states (Phase 4)
 
 - **`UploadDropzone`'s wrapper is now a `flex flex-col min-h-(--browser-frame-min-height)`
   container** (`features/upload/upload-dropzone.tsx`), not a bare `relative` div. Its drag overlay
@@ -335,7 +335,7 @@ What the diff does not show:
   itself grows to fill whatever height is left and centres in it, matching the room-root placard
   instead of reading as a second, shorter kind of "empty."
 
-### Added — The `..` row (Phase 4, issue 03)
+### Added — The `..` row (Phase 4)
 
 - **A pinned first row in the folder table that navigates one level up**
   (`features/node-browser/node-table.tsx`), rendered outside `nodes.map` — no size, contents, date
@@ -356,7 +356,7 @@ What the diff does not show:
   in-table "this folder is empty" message, so climbing out never depends on remembering the
   breadcrumb is there.
 
-### Added — Download a file (Phase 4, issue 05)
+### Added — Download a file (Phase 4)
 
 - **`GET /api/rooms/:roomId/nodes/:nodeId/content?disposition=inline|attachment`.** The parameter
   selects the `Content-Disposition` **type** written into the presigned GET; `filename*=` (RFC 5987)
@@ -382,9 +382,9 @@ What the diff does not show:
   download and no way to ask for it.
 - **`InlineFailure`** (`features/node-browser/inline-failure.tsx`) is the extracted banner that
   already reported failed drag-moves, now shared with download — the two operations that finish with
-  no dialog open to report into. It is one component on purpose: Activity (`phase-4.1`, issue 06)
-  deletes this surface and takes both cases with it, and a second hand-rolled banner would survive
-  that deletion unnoticed.
+  no dialog open to report into. It is one component on purpose: the backlogged Activity panel
+  (Phase 4.1) deletes this surface and takes both cases with it, and a second hand-rolled banner
+  would survive that deletion unnoticed.
 - Verified against the local MinIO bucket that both dispositions come back on the response and that
   a Cyrillic file name survives the header intact. **GCS is not covered by that** — the `response-*`
   overrides are exactly where the two can differ, so it stays a manual gate item against a real

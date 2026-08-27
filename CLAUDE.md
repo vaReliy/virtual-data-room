@@ -158,14 +158,16 @@ pointed at one, and nothing was ever written there.
 Tasks are local markdown under gitignored `notes/issues/`, never GitHub or GitLab: this repository
 has no remote configured, so an agent must not reach for `gh` or open a PR.
 
-- One phase or feature per directory: `notes/issues/<slug>/`, e.g. `phase-3/`, `phase-4.1/`.
+- One phase or feature per directory: `notes/issues/<slug>/`, e.g. `phase-3/`, `phase-4/`. A slug
+  need not be a phase number — `notes/issues/backlog/` holds groomed work that was deliberately not
+  scheduled into a phase (see `docs/roadmap.md`'s "Backlog" section).
 - The brief for the whole set is `notes/issues/<slug>/PRD.md`.
 - Individual issues are `notes/issues/<slug>/issues/<NN>-<slug>.md`, numbered from `01` — unless the
   set inherits issues from another one, in which case the numbering continues around them and the
-  PRD says so. Phase 4 is that case: `03`–`05` were groomed for Phase 4.1 and pulled forward, so its
-  sharing issues start at `06`. Numbers are never reused within a directory and never renumbered
-  once a commit references them; a bare number is meaningful only inside one directory, so a
-  cross-directory reference is always a full path.
+  PRD says so. Phase 4 is that case: `03`–`05` were groomed for what became `notes/issues/backlog/`
+  and pulled forward, so Phase 4's own sharing issues start at `06`. Numbers are never reused within
+  a directory and never renumbered once a commit references them; a bare number is meaningful only
+  inside one directory, so a cross-directory reference is always a full path.
 - `notes/issues/<slug>/deviations.md` carries what a session learned that the next one cannot
   re-derive — a real bucket's behaviour, a library that did not do what its docs said. `notes/` is
   gitignored, so anything that must outlive the work belongs in `CHANGELOG.md` instead.
