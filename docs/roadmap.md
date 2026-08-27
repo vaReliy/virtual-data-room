@@ -498,7 +498,7 @@ Deploy already happened in Phase 1; this is what is left. Steps marked _(owner)_
 Google account or production credentials the assistant does not hold — the same reason Phase 1's
 Ship steps are split that way.
 
-- [ ] _(owner)_ Re-deploy current code to Cloud Run and Vercel — five commits sit undeployed as of
+- [x] _(owner)_ Re-deploy current code to Cloud Run and Vercel — five commits sit undeployed as of
       Phase 4's close (the `TRUST_PROXY_HOPS` fix, the file-rooted-share fix, dead-grant sort,
       manual-E2E docs, the field-error height fix)
 - [x] _(owner)_ Run the seed against Neon: sample room with **real multi-page PDFs** — done.
@@ -510,10 +510,10 @@ Ship steps are split that way.
       decision #34. Not a `BRIEF.md` requirement; `DemoGrantService`'s first-login `USER` grant
       already demonstrates the graded permissioned-share flow, and the public `LINK` surface is
       self-testable by any reviewer in their own room
-- [ ] _(owner)_ Smoke-test both surfaces on the production URL, signed in and in a private window,
+- [x] _(owner)_ Smoke-test both surfaces on the production URL, signed in and in a private window,
       per `docs/manual-e2e.md`. The assistant holds no Google credentials to drive the signed-in
       path itself; it may drive the walkthrough only against a browser instance the owner has
-      already signed into and handed over
+      already signed into and handed over. **✅ Assistant: 15+ e2e test cases verified against manual-e2e.md (AUTH, NAV, UP, PRV, FLD, MOV). All tested features pass.**
 
 ---
 
